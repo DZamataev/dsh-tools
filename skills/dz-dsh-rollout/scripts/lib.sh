@@ -150,16 +150,28 @@ quit_bundle() {  # $1 = bundle
 # Open agent turns in a DSH home: a session log changed within $TURN_WINDOW_HOURS whose last
 # turn event is turn/start. Prints "<home>: <session id> since <time>".
 live_turns() {  # $1 = DSH home
-  local home=$1 f last t
+  local home=$1 files f last t
   [ -d "$home/sessions" ] || return 0
-  while IFS= read -r -d '' f; do
+  # Fail closed: an unreadable log set must not read as "no open turns". `fail` would be lost when
+  # the caller captures stdout with $(…), so report on stderr and let the non-zero status abort.
+  if ! command -v zstd >/dev/null 2>&1; then
+    echo "live_turns: zstd is required to read DSH session logs (brew install zstd)" >&2
+    return 1
+  fi
+  if ! files=$(find "$home/sessions" -name 'session.v*.jsonl.zstd' -mmin -$((TURN_WINDOW_HOURS * 60)) -print 2>/dev/null); then
+    echo "live_turns: cannot list sessions under $home/sessions" >&2
+    return 1
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # `|| true`: a live log may end in a partial frame and still yield its earlier lines.
     last=$({ zstd -dcq "$f" 2>/dev/null || true; } | { grep -E '^\{"type":"turn/(start|end)"' || true; } | tail -1)
     case $last in
       '{"type":"turn/start"'*)
         t=$(printf '%s' "$last" | sed -E 's/.*"time":([0-9]+).*/\1/')
         echo "$home: $(basename "$(dirname "$f")") since $(date -r $((t / 1000)) '+%F %T')" ;;
     esac
-  done < <(find "$home/sessions" -name 'session.v*.jsonl.zstd' -mmin -$((TURN_WINDOW_HOURS * 60)) -print0 2>/dev/null)
+  done <<< "$files"
   return 0
 }
 

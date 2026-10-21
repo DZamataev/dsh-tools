@@ -43,7 +43,7 @@ commit "$SB/upstream" up.txt up "upstream change"
 
 LIVE="$SB/live"; TEST="$SB/test"; APPDIR="$SB/Applications"
 mkdir -p "$LIVE/logs" "$APPDIR" "$SB/cfg"
-cat > "$SB/cfg/config.sh" <<EOT
+cat > "$SB/cfg/config.sh" <<EOF
 ROLLOUT_FORK=$SB/fork
 ROLLOUT_BRANCH=develop
 ROLLOUT_WT_ROOT=$WT
@@ -55,7 +55,7 @@ ROLLOUT_APP="$APPDIR/DeepSeek Harness.app"
 ROLLOUT_SIGN_IDENTITY=-
 ROLLOUT_LEGACY_APP=
 ROLLOUT_POST_DEPLOY='echo hook-ran > "\$ROLLOUT_LIVE_HOME/hook.out"'
-EOT
+EOF
 export ROLLOUT_CONFIG="$SB/cfg/config.sh" ROLLOUT_NO_NOTIFY=1 ROLLOUT_STOP_TIMEOUT=5
 # The bench may run inside DSH or Claude Code: deploy.sh would refuse everything but --dry-run.
 unset DSH_SESSION_ID DSH_SHELL CLAUDECODE
@@ -71,6 +71,11 @@ turns=$(lib live_turns "$TH" | sed -E 's/^.*: ([^ ]+) since .*$/\1/' | sort | tr
 check "live_turns: open and reopened turns, not finished or stale ones" '[ "$turns" = "S_OPEN S_REOPENED " ]'
 turns=$(lib live_turns "$SB/nohome"); rc=$?
 check "live_turns: a home without sessions has none, exit 0" '[ -z "$turns" ] && [ $rc -eq 0 ]'
+# zstd lives in /opt/homebrew/bin; system dirs hide it. BASH_ENV may re-add PATH entries in a child bash.
+NOZSTD="env BASH_ENV= PATH=/usr/bin:/bin"
+err=$($NOZSTD bash -c '. "$1"; trap - EXIT; live_turns "$2"' _ "$S/lib.sh" "$TH" 2>&1 >/dev/null); rc=$?
+check "live_turns: without zstd it fails closed (non-zero, message on stderr)" \
+  '[ $rc -ne 0 ] && [[ "$err" == *"zstd is required"* ]] && ! $NOZSTD bash -c "command -v zstd" >/dev/null'
 
 # ── lib: processes by executable path ──
 mkbundle "$SB/Fake.app"; "$SB/Fake.app/Contents/MacOS/DeepSeek Harness" 120 & fake=$!; sleep 0.5
@@ -105,7 +110,7 @@ check "seed: relative plugin links resolve at the same depth" \
 
 # ── lib: signing and bundle install ──
 mkdir -p "$SB/Sign.app/Contents/MacOS"; cp /usr/bin/true "$SB/Sign.app/Contents/MacOS/Sign"
-cat > "$SB/Sign.app/Contents/Info.plist" <<'EOT'
+cat > "$SB/Sign.app/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -113,7 +118,7 @@ cat > "$SB/Sign.app/Contents/Info.plist" <<'EOT'
 <key>CFBundleExecutable</key><string>Sign</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 </dict></plist>
-EOT
+EOF
 check "sign_bundle: an ad-hoc signature verifies strictly" 'lib sign_bundle "$SB/Sign.app" - >/dev/null 2>&1'
 check "requirement_ok: an ad-hoc identity needs no certificate" 'lib requirement_ok "$SB/Sign.app" -'
 mkdir -p "$SB/inst/Old.app/Contents"; echo old > "$SB/inst/Old.app/Contents/old"
