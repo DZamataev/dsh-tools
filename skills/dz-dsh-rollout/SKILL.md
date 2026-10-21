@@ -60,7 +60,10 @@ Ghostty once their DSH turns are done.
      later stage failed. `--full` on the operator's word.
    - On success hand the operator a checklist for the test window: a normal chat on each provider
      they use (TeamClaude must answer, not 429), and each merged feature, concretely. Wait for
-     their confirmation.
+     their confirmation. A feature shipped as an optional bundle (an `experimental/*-bundle`
+     package) is off in the seeded test profile, as in live: the checklist starts with switching
+     it on in Plugins → More, and states its own preconditions (composer prediction needs two
+     assistant replies). No record of the feature in the Session log means it is not mounted.
    - A branch changed after verify: `merge.sh && verify.sh` rebuilds and restarts the test instance.
    - Errors the operator reports from the test window: `~/.dsh-dev/instance.log`, and the session
      logs under `~/.dsh-dev/sessions/`.
