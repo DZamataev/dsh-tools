@@ -206,6 +206,29 @@ check "deploy leaves no .new or .old bundle"            '[ ! -e "$APPDIR/DeepSee
 check "deploy stamps the deployed sha"                  '[ "$(cut -d" " -f1 "$LIVE/logs/rollout/deployed")" = "$FORKSHA" ]'
 check "deploy runs the post-deploy hook"                '[ "$(cat "$LIVE/hook.out" 2>/dev/null)" = hook-ran ]'
 
+# ── state.sh ──
+st() { "$S/state.sh" | grep "^$1=" | cut -d= -f2-; }
+check "state: rollout once config, develop and the app exist" '[ "$(st mode)" = rollout ]'
+check "state: the verified stamp matches develop"       '[ "$(st verified_is_head)" = yes ]'
+out=$(ROLLOUT_APP="$SB/NoApp.app" st mode)
+check "state: no live bundle yet is cutover"            '[ "$out" = cutover ]'
+out=$(ROLLOUT_CONFIG="$SB/none.sh" ROLLOUT_FORK= st mode)
+check "state: no fork configured is initial-setup"      '[ "$out" = initial-setup ]'
+out=$(ROLLOUT_BRANCH=nope st mode)
+check "state: no integration branch is initial-setup"   '[ "$out" = initial-setup ]'
+check "state: ends with the result line"                '[[ $("$S/state.sh" | tail -1) == "STATE OK: mode="* ]]'
+noagent() { env -u CLAUDECODE -u DSH_SESSION_ID -u DSH_SHELL $(env | grep -o '^CODEX_[A-Za-z_]*' | sed 's/^/-u /') "$@"; }
+h() { noagent "$@" "$S/state.sh" | grep "^harness=" | cut -d= -f2; }
+check "state: harness from DSH_SESSION_ID"              '[ "$(h DSH_SESSION_ID=x)" = dsh ]'
+check "state: harness from CLAUDECODE"                  '[ "$(h CLAUDECODE=1)" = claude-code ]'
+check "state: harness from a CODEX_ variable"           '[ "$(h CODEX_SANDBOX=seatbelt)" = codex ]'
+check "state: no marker is unknown"                     '[ "$(h)" = unknown ]'
+check "state: inside_dsh under DSH_SHELL=1"             '[ "$(noagent DSH_SHELL=1 "$S/state.sh" | grep ^inside_dsh= | cut -d= -f2)" = yes ]'
+# The sandbox live home has sessions (the deploy section's open turn); zstd is absent from this PATH.
+out=$($NOZSTD "$S/state.sh" 2>&1)
+check "state: unreadable turns print open_turns=unknown" '[[ $out == *"open_turns=unknown"* && $out != *"open_turns=1"* ]]'
+check "state: unreadable turns still end with the result line" '[[ $(echo "$out" | tail -1) == "STATE OK: mode="* ]]'
+
 # ── summary ──
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
