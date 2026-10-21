@@ -152,8 +152,9 @@ quit_bundle() {  # $1 = bundle
 live_turns() {  # $1 = DSH home
   local home=$1 files f last t
   [ -d "$home/sessions" ] || return 0
-  # Fail closed: an unreadable log set must not read as "no open turns". `fail` would be lost when
-  # the caller captures stdout with $(…), so report on stderr and let the non-zero status abort.
+  # Fail closed: an unreadable log set must not read as "no open turns". Report on stderr and return
+  # non-zero. Callers must capture the call and fail on a non-zero status, because a conditional or
+  # pipeline caller would otherwise read the failure as no open turns.
   if ! command -v zstd >/dev/null 2>&1; then
     echo "live_turns: zstd is required to read DSH session logs (brew install zstd)" >&2
     return 1

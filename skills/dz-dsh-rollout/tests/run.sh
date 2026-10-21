@@ -163,6 +163,49 @@ check "verify requires a sign identity"                 '[[ $out == *"VERIFY FAI
 out=$("$S/verify.sh" --since 2>&1)
 check "verify --since needs a REF"                      '[[ $out == *"VERIFY FAILED: --since needs a REF"* ]]'
 
+# ── deploy.sh ──
+FORKSHA=$(git -C "$SB/fork" rev-parse develop)
+out=$("$S/deploy.sh" --dry-run 2>&1)
+check "deploy dry run warns on an unverified sha"       '[[ $out == *"WARNING: develop"*"is not verified"* ]]'
+check "deploy dry run warns on a missing artifact"      '[[ $out == *"WARNING: no valid artifact"* ]]'
+check "deploy dry run ends with the result line"        '[[ $(echo "$out" | tail -1) == "DEPLOY OK: dry run" ]]'
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy refuses an unverified sha"                '[[ $out == *"DEPLOY FAILED"*"is not verified"* ]]'
+mkdir -p "$LIVE/logs/rollout"
+echo "$FORKSHA now tests=changed app=true artifact=x" > "$LIVE/logs/rollout/verified"
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy refuses a verified sha without an artifact" '[[ $out == *"DEPLOY FAILED: no valid artifact"* ]]'
+mkdir -p "$TEST/artifacts/$FORKSHA"; ditto "$SB/Sign.app" "$TEST/artifacts/$FORKSHA/DeepSeek Harness.app"
+out=$("$S/deploy.sh" --dry-run 2>&1)
+check "deploy dry run accepts a verified sha with its artifact" '[[ $out == *"verified: "* && $out == *"artifact: "* && $out != *WARNING* ]]'
+echo dirty >> "$SB/fork/base.txt"
+out=$("$S/deploy.sh" --dry-run 2>&1)
+check "deploy refuses a dirty fork"                     '[[ $out == *"has uncommitted changes"* ]]'
+git -C "$SB/fork" checkout -q -- base.txt
+out=$(DSH_SESSION_ID=x "$S/deploy.sh" --push 2>&1)
+check "deploy refuses inside a DSH agent session"       '[[ $out == *"DEPLOY FAILED: deploy is run by the operator"* ]]'
+check "the refusal prints the absolute command"         '[[ $out == *"  $(cd "$S" && pwd)/deploy.sh --push"* ]]'
+out=$(DSH_SHELL=1 "$S/deploy.sh" 2>&1)
+check "deploy refuses inside a DSH terminal"            '[[ $out == *"DEPLOY FAILED: deploy is run by the operator"* ]]'
+out=$(DSH_SESSION_ID=x "$S/deploy.sh" --dry-run 2>&1)
+check "a dry run works inside DSH and names the command" '[[ $out == *"DEPLOY OK: dry run"* && $out == *"the operator runs"* ]]'
+mkbundle "$APPDIR/DeepSeek Harness.app"
+"$APPDIR/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" 120 & lpid=$!; sleep 0.5
+session "$LIVE" S_LIVE turn/start
+out=$("$S/deploy.sh" --dry-run 2>&1)
+check "deploy dry run lists a running turn of the live app" '[[ $out == *"running turns:"*"S_LIVE"* ]]'
+out=$(env BASH_ENV= PATH=/usr/bin:/bin "$S/deploy.sh" --dry-run 2>&1)
+check "deploy dry run fails closed when turns cannot be read (no zstd)" '[[ $out == *"DEPLOY FAILED: cannot read open turns in"* ]]'
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy refuses while the live app has a turn running" '[[ $out == *"DEPLOY FAILED"*"turn(s) still running"* ]] && kill -0 '"$lpid"
+kill "$lpid"; wait "$lpid" 2>/dev/null
+rm -rf "$APPDIR/DeepSeek Harness.app"; mkdir -p "$APPDIR/DeepSeek Harness.app/Contents"; echo old > "$APPDIR/DeepSeek Harness.app/Contents/old"
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy installs the artifact into the app path"  '[[ $out == *"DEPLOY OK: live"* ]] && [ -f "$APPDIR/DeepSeek Harness.app/Contents/MacOS/Sign" ] && [ ! -e "$APPDIR/DeepSeek Harness.app/Contents/old" ]'
+check "deploy leaves no .new or .old bundle"            '[ ! -e "$APPDIR/DeepSeek Harness.app.new" ] && [ ! -e "$APPDIR/DeepSeek Harness.app.old" ]'
+check "deploy stamps the deployed sha"                  '[ "$(cut -d" " -f1 "$LIVE/logs/rollout/deployed")" = "$FORKSHA" ]'
+check "deploy runs the post-deploy hook"                '[ "$(cat "$LIVE/hook.out" 2>/dev/null)" = hook-ran ]'
+
 # ── summary ──
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
