@@ -36,6 +36,7 @@ for arg in "$@"; do
     *) fail "unknown argument: $arg" ;;
   esac
 done
+[ "$prev" != --since ] || fail "--since needs a REF"
 
 step "preconditions"
 require_config
@@ -61,13 +62,13 @@ else
 fi
 # shellcheck disable=SC2046  # one -u NAME pair per word
 bw() { (cd "$BUILD_WT" && env $(dsh_env_unset) "$@"); }
-ILOG=$STATE_DIR/verify-install.log
+INSTALL_LOG=$STATE_DIR/verify-install.log
 install_deps() {
-  bw pnpm install --frozen-lockfile >>"$ILOG" 2>&1 || fail "pnpm install failed — see $ILOG"
-  bw pnpm run build:native-system >>"$ILOG" 2>&1 || fail "build:native-system failed — see $ILOG"
+  bw pnpm install --frozen-lockfile >>"$INSTALL_LOG" 2>&1 || fail "pnpm install failed — see $INSTALL_LOG"
+  bw pnpm run build:native-system >>"$INSTALL_LOG" 2>&1 || fail "build:native-system failed — see $INSTALL_LOG"
 }
 step "dependencies"
-: >"$ILOG"
+: >"$INSTALL_LOG"
 install_deps
 
 # vitest JSON reports → one id per failure: "<file> > <test>", or "<file> (suite)" for a file that
@@ -100,17 +101,21 @@ if [ "$tests" != none ]; then
     --reporter=default --reporter=json --outputFile.json="$FJSON" >"$FLOG" 2>&1 || rc=$?
   grep -E '^ *(Test Files|Tests) ' "$FLOG" | tail -2 || true
   if [ $rc -ne 0 ]; then
-    files=$(failed_ids "$FJSON" | files_of)
+    files=$(failed_ids "$FJSON" | files_of) || fail "unreadable vitest report $FJSON — see $FLOG"
     [ -n "$files" ] || fail "vitest exited $rc without a failure list — see $FLOG"
     step "rerun $(echo "$files" | wc -l | tr -d ' ') failing file(s) one by one"
     RLOG=$STATE_DIR/verify-tests-rerun.log; : >"$RLOG"
-    rjson=(); i=0
+    rjson=(); nor=""; i=0
     for f in $files; do
       i=$((i + 1)); out=$STATE_DIR/verify-tests-rerun-$i.json
-      bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$RLOG" 2>&1 || true
+      rc=0
+      bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$RLOG" 2>&1 || rc=$?
+      # A rerun that exits non-zero without a report is a failure, not a pass.
+      if [ $rc -ne 0 ] && [ ! -s "$out" ]; then nor="$nor$f (no report)"$'\n'; fi
       rjson+=("$out")
     done
-    fork_fail=$(failed_ids "${rjson[@]}")
+    fork_fail=$({ printf '%s' "$nor"; failed_ids "${rjson[@]}"; } | sort -u) \
+      || fail "unreadable vitest report in the fork rerun — see $RLOG"
     if [ -z "$fork_fail" ]; then
       echo "all pass alone: parallel-run flakes"
     else
@@ -119,16 +124,19 @@ if [ "$tests" != none ]; then
       ULOG=$STATE_DIR/verify-tests-upstream.log; : >"$ULOG"
       git -C "$BUILD_WT" checkout -q --detach "$UPBASE" || fail "checkout of the upstream base in $BUILD_WT failed"
       install_deps
-      ujson=(); i=0
+      ujson=(); unor=""; i=0
       for f in $(echo "$fork_fail" | files_of); do
         [ -f "$f" ] || continue   # a test file the fork added fails only on the fork
         i=$((i + 1)); out=$STATE_DIR/verify-tests-upstream-$i.json
-        bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$ULOG" 2>&1 || true
+        rc=0
+        bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$ULOG" 2>&1 || rc=$?
+        if [ $rc -ne 0 ] && [ ! -s "$out" ]; then unor="$unor$f (no report)"$'\n'; fi
         ujson+=("$out")
       done
       git -C "$BUILD_WT" checkout -q --detach "$SHA" || fail "checkout back to $SHORT in $BUILD_WT failed"
       install_deps
-      up_fail=$(failed_ids ${ujson[@]+"${ujson[@]}"})
+      up_fail=$({ printf '%s' "$unor"; failed_ids ${ujson[@]+"${ujson[@]}"}; } | sort -u) \
+        || fail "unreadable vitest report in the upstream rerun — see $ULOG"
       ours=$(comm -23 <(echo "$fork_fail") <(echo "$up_fail") | sed '/^$/d')
       echo "failing on $BRANCH: $(echo "$fork_fail" | wc -l | tr -d ' '), also on upstream: $(comm -12 <(echo "$fork_fail") <(echo "$up_fail") | sed '/^$/d' | wc -l | tr -d ' ')"
       if [ -n "$ours" ]; then
@@ -146,7 +154,7 @@ TARGETS=$BUILD_WT/apps/desktop/.desktop-build/targets/mac-arm64
 # Remove earlier outputs so the bundle found below is this run's.
 [ ! -d "$TARGETS" ] || find "$TARGETS" -maxdepth 4 -type d -name "$APP_NAME" -prune -exec rm -rf {} +
 bw pnpm run package:desktop:mac:arm64:unsigned --dir >"$PLOG" 2>&1 || fail "packaging failed — see $PLOG"
-BUILT=$(find "$TARGETS" -maxdepth 4 -type d -name "$APP_NAME" 2>/dev/null | head -1)
+BUILT=$({ find "$TARGETS" -maxdepth 4 -type d -name "$APP_NAME" 2>/dev/null || true; } | head -1)
 [ -n "$BUILT" ] || fail "no $APP_NAME under $TARGETS after packaging — see $PLOG"
 echo "built: $BUILT"
 bw pnpm run build:check >"$STATE_DIR/verify-build-check.log" 2>&1 || fail "build:check failed — see $STATE_DIR/verify-build-check.log"
@@ -195,7 +203,8 @@ if $app; then
   done
   [ -n "$(test_instance_pids)" ] || fail "test instance exited (or never started) — see $ILOG"
   $up || fail "test instance runs but its Host is not listening after 120 s — see $ILOG"
-  [ -e "$TEST_HOME/electron-user-data/SingletonLock" ] \
+  # SingletonLock is a dangling symlink ("host-pid"), so -e alone would reject a live lock.
+  { [ -L "$TEST_HOME/electron-user-data/SingletonLock" ] || [ -e "$TEST_HOME/electron-user-data/SingletonLock" ]; } \
     || fail "the test instance ignored --user-data-dir and would share live's single-instance lock — see $ILOG"
   echo "test instance up: $ART; DSH_HOME=$TEST_HOME; userData $TEST_HOME/electron-user-data"
 fi

@@ -160,6 +160,8 @@ out=$("$S/verify.sh" --bogus 2>&1)
 check "verify rejects an unknown argument"              '[[ $out == *"VERIFY FAILED: unknown argument: --bogus"* ]]'
 out=$(ROLLOUT_SIGN_IDENTITY= "$S/verify.sh" --no-tests 2>&1)
 check "verify requires a sign identity"                 '[[ $out == *"VERIFY FAILED: ROLLOUT_SIGN_IDENTITY is not set"* ]]'
+out=$("$S/verify.sh" --since 2>&1)
+check "verify --since needs a REF"                      '[[ $out == *"VERIFY FAILED: --since needs a REF"* ]]'
 
 # ── summary ──
 echo
