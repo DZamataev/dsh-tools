@@ -11,7 +11,7 @@
 #
 #   state.sh [--help]
 . "$(dirname "$0")/lib.sh"
-case ${1:-} in -h|--help) trap - EXIT; sed -n '2,12p' "$0"; exit 0 ;; esac
+case ${1:-} in -h|--help) trap - EXIT; sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;; esac
 
 # The agent's own marker first: Claude Code or Codex started in a DSH terminal still inherit DSH_SHELL.
 if [ -n "${DSH_SESSION_ID:-}" ]; then harness=dsh

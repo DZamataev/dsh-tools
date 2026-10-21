@@ -18,6 +18,7 @@
 # ROLLOUT_APP (bundled Node and pnpm; ROLLOUT_NODE / ROLLOUT_PNPM override them),
 # DSH_TOOLS_OLD_PLUGINS (the retired plugin root, default ~/dev/dsh-plugins).
 set -euo pipefail
+case ${1:-} in -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;; esac
 HERE=$(cd "$(dirname "$0")" && pwd)
 OLD=${DSH_TOOLS_OLD_PLUGINS:-$HOME/dev/dsh-plugins}
 APP=${ROLLOUT_APP:-$HOME/Applications/DeepSeek Harness.app}

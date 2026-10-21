@@ -21,7 +21,7 @@ for arg in "$@"; do
     --no-relaunch) relaunch=false ;;
     --unverified) unverified=true ;;
     --ignore-live-turns) ignore_live=true ;;
-    -h|--help) trap - EXIT; sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) trap - EXIT; sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
     *) fail "unknown argument: $arg" ;;
   esac
 done

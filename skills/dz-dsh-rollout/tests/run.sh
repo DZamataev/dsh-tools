@@ -349,6 +349,13 @@ out=$($NOZSTD "$S/state.sh" 2>&1)
 check "state: unreadable turns print open_turns=unknown" '[[ $out == *"open_turns=unknown"* && $out != *"open_turns=1"* ]]'
 check "state: unreadable turns still end with the result line" '[[ $(echo "$out" | tail -1) == "STATE OK: mode="* ]]'
 
+# ── --help prints exactly the header comment ──
+for sc in merge verify deploy state; do
+  out=$("$S/$sc.sh" --help 2>&1)
+  check "$sc.sh --help: the whole header comment, nothing after it" \
+    '[[ $(echo "$out" | tail -1) == "#"* && $(echo "$out" | head -1) == "# "* && $(echo "$out" | grep -vc "^#") -eq 0 && $(echo "$out" | wc -l) -eq $(awk "NR>1 && /^[^#]/{print NR-2; exit}" "$S/$sc.sh") ]]'
+done
+
 # ── skills/install.sh ──
 I="$HERE/../../install.sh"
 out=$(HOME="$SB/h" bash "$I" --target agents dz-dsh-rollout 2>&1)

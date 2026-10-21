@@ -155,6 +155,11 @@ cp "$SB/before.json" "$PR8/package.json"; chmod 600 "$PR8/package.json"
 out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H8" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
 check "a rewritten package.json keeps mode 600" '[ $rc -eq 0 ] && grep -q "link:$P/provider-limits" "$PR8/package.json" && [ "$(stat -f %Lp "$PR8/package.json")" = 600 ]'
 
+# --help prints exactly the header comment
+out=$(bash "$P/install.sh" --help 2>&1); rc=$?
+check "install.sh --help: the whole header comment, nothing after it" \
+  '[ $rc -eq 0 ] && [[ $(echo "$out" | tail -1) == "#"* && $(echo "$out" | grep -vc "^#") -eq 0 && $(echo "$out" | wc -l) -eq $(awk "NR>1 && /^[^#]/{print NR-2; exit}" "$P/install.sh") ]]'
+
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
 exit $FAILS

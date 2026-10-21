@@ -32,7 +32,7 @@ for arg in "$@"; do
     --no-app) app=false ;;
     --reseed) reseed=true ;;
     --stop) stop_test_instance; ok "test instance stopped"; exit 0 ;;
-    -h|--help) trap - EXIT; sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help) trap - EXIT; sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
     *) fail "unknown argument: $arg" ;;
   esac
 done

@@ -16,7 +16,7 @@ for arg in "$@"; do
   case $arg in
     --dry-run) dry_run=true ;;
     --upstream) upstream=true ;;
-    -h|--help) trap - EXIT; sed -n '2,11p' "$0"; exit 0 ;;
+    -h|--help) trap - EXIT; sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
     *) fail "unknown argument: $arg" ;;
   esac
 done
