@@ -126,6 +126,30 @@ lib install_bundle "$SB/Sign.app" "$SB/inst/Old.app" >/dev/null 2>&1
 check "install_bundle: replaces the bundle, no .new/.old left" \
   '[ -f "$SB/inst/Old.app/Contents/MacOS/Sign" ] && [ ! -e "$SB/inst/Old.app/Contents/old" ] && [ ! -e "$SB/inst/Old.app.new" ] && [ ! -e "$SB/inst/Old.app.old" ]'
 
+# ── merge.sh ──
+out=$("$S/merge.sh" --dry-run 2>&1)
+check "merge dry run lists the worktree branch ahead"   '[[ $out == *"to merge: feat/a (+1"* ]]'
+check "merge dry run reports an up-to-date branch"      '[[ $out == *"up to date: feat/clean"* ]]'
+check "merge dry run skips the build worktree"          '[[ $out != *"rollout-build"* ]]'
+check "merge dry run skips worktrees outside WT_ROOT"   '[[ $out != *"outside/x"* ]]'
+check "merge dry run merges nothing"                    '[ ! -f "$SB/fork/a.txt" ]'
+check "merge dry run ends with the result line"         '[[ $(echo "$out" | tail -1) == "MERGE OK: dry run"* ]]'
+out=$(ROLLOUT_WT_ROOT= "$S/merge.sh" --dry-run 2>&1)
+check "env var overrides the config file (all worktrees)" '[[ $out == *"to merge: outside/x"* && $out != *"rollout-build"* ]]'
+out=$(ROLLOUT_CONFIG="$SB/none.sh" ROLLOUT_FORK= "$S/merge.sh" --dry-run 2>&1)
+check "missing config is reported"                      '[[ $out == *"MERGE FAILED: ROLLOUT_FORK is not set"* ]]'
+out=$("$S/merge.sh" --upstream 2>&1)
+check "merge.sh --upstream succeeds"                    '[[ $out == *"MERGE OK"* ]]'
+check "upstream merged into develop"                    '[ -f "$SB/fork/up.txt" ]'
+check "feature branch merged into develop"              '[ -f "$SB/fork/a.txt" ]'
+git -C "$WT/clean" checkout -q -b feat/conflict; commit "$WT/clean" a.txt other "conflicting a"
+git -C "$WT/clean" checkout -q feat/clean; git -C "$WT/clean" reset -q --hard feat/conflict
+out=$("$S/merge.sh" 2>&1)
+check "a conflict fails with the branch named"          '[[ $out == *"MERGE FAILED: merge conflict: feat/clean"* ]]'
+check "a conflict leaves develop clean (aborted)"       '[ -z "$(git -C "$SB/fork" status --porcelain --untracked-files=no)" ]'
+git -C "$WT/clean" reset -q --hard develop
+git -C "$SB/fork" branch -q -D feat/conflict
+
 # ── summary ──
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
