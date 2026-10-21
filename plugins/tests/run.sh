@@ -63,6 +63,25 @@ check "the retry after a failure reruns pnpm and succeeds" '[ $rc -eq 0 ] && [[ 
 check "only the exact old root is rewritten"            'grep -q "\"@local/a\": \"link:$P/provider-limits\"" "$PR2/package.json" && grep -q "\"@local/b\": \"link:$OLD-other/x\"" "$PR2/package.json" && grep -q "\"left-pad\": \"^1.0.0\"" "$PR2/package.json"'
 check "a successful run leaves no backup file"          '[ -z "$(ls "$PR2" | grep -F .bak)" ]'
 
+# interrupted run: the backup holds the original links, package.json is already rewritten
+printf 'import fs from "node:fs"\nfs.writeFileSync(process.env.PNPM_MARK, "ran")\n' > "$SB/pnpm-mark.mjs"
+H3="$SB/home3"; PR3="$H3/profiles/desktop"; mkdir -p "$PR3"
+cat > "$PR3/package.json.dz-relink.bak" <<EOT
+{
+  "name": "dsh-profile-desktop",
+  "private": true,
+  "dependencies": {
+    "@local/a": "link:$OLD/provider-limits"
+  }
+}
+EOT
+sed "s#link:$OLD/#link:$P/#" "$PR3/package.json.dz-relink.bak" > "$PR3/package.json"
+out=$(PNPM_MARK="$SB/mark" DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-mark.mjs" ROLLOUT_LIVE_HOME="$H3" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "an unfinished relink is reported as restored"    '[[ $out == *"$PR3: restored package.json from an unfinished relink"* ]]'
+check "an unfinished relink is relinked again, exit 0"  '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]] && grep -q "\"link:$P/provider-limits\"" "$PR3/package.json"'
+check "an unfinished relink reruns pnpm"                '[ -f "$SB/mark" ]'
+check "an unfinished relink leaves no backup file"      '[ ! -e "$PR3/package.json.dz-relink.bak" ]'
+
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
 exit $FAILS

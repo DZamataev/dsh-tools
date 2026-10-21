@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Point the DSH Desktop profiles' link plugins at this directory and reinstall the profiles with the
 # app's bundled pnpm. dz-dsh-rollout runs it after each deploy, while every DSH window is closed
-# (Desktop never runs pnpm at startup). Idempotent. A failed pnpm install restores package.json from
-# a backup, so a retry sees the old links again.
+# (Desktop never runs pnpm at startup). Idempotent. A failed or interrupted pnpm install leaves
+# package.json.dz-relink.bak (the original); the next run restores it first, so the old links are
+# found again and pnpm reruns.
 #
 # Environment: ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME (homes whose profiles/desktop is fixed),
 # ROLLOUT_APP (bundled Node and pnpm; ROLLOUT_NODE / ROLLOUT_PNPM override them),
@@ -19,8 +20,12 @@ PNPM=${ROLLOUT_PNPM:-$RT/pnpm/bin/pnpm.mjs}
 
 for home in "${ROLLOUT_LIVE_HOME:-$HOME/.dsh}" "${ROLLOUT_TEST_HOME:-$HOME/.dsh-dev}"; do
   profile=$home/profiles/desktop
-  [ -f "$profile/package.json" ] || continue
   backup=$profile/package.json.dz-relink.bak
+  if [ -f "$backup" ]; then
+    mv "$backup" "$profile/package.json"
+    echo "$profile: restored package.json from an unfinished relink"
+  fi
+  [ -f "$profile/package.json" ] || continue
   cp "$profile/package.json" "$backup"
   changed=$("$NODE" -e '
     const fs = require("fs")
