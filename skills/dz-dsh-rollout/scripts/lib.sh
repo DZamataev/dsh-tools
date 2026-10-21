@@ -182,7 +182,7 @@ test_instance_main_pids() {  # the Electron main process: its parent is not a te
 }
 test_instance_sha() {
   local pid exe
-  pid=$(test_instance_pids | head -1)
+  pid=$(test_instance_pids); pid=${pid%%$'\n'*}   # not `| head -1`: SIGPIPE under pipefail
   [ -n "$pid" ] || return 0
   exe=$(ps -o comm= -p "$pid" 2>/dev/null) || return 0
   exe=${exe#"$ARTIFACTS/"}

@@ -43,8 +43,9 @@ verified_is_head=no
 [ -n "$head" ] && [ "${verified%% *}" = "$head" ] && verified_is_head=yes
 
 live=none live_pid=""
-if [ -n "$(bundle_pids "$APP")" ]; then live=app; live_pid=$(bundle_pids "$APP" | head -1)
-elif [ -n "$(bundle_pids "$LEGACY_APP")" ]; then live=legacy; live_pid=$(bundle_pids "$LEGACY_APP" | head -1); fi
+if [ -n "$(bundle_pids "$APP")" ]; then live=app; live_pid=$(bundle_pids "$APP")
+elif [ -n "$(bundle_pids "$LEGACY_APP")" ]; then live=legacy; live_pid=$(bundle_pids "$LEGACY_APP"); fi
+live_pid=${live_pid%%$'\n'*}   # first pid; not `| head -1`, which can SIGPIPE under pipefail
 app_present=no; [ -d "$APP" ] && app_present=yes
 test_instance=none; [ -n "$(test_instance_pids)" ] && test_instance="running $(test_instance_sha)"
 

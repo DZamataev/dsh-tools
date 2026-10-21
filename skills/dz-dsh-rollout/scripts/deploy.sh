@@ -63,7 +63,8 @@ else
 fi
 # The first deploy (no $APP yet) must quit the dev build that runs live: it has to be named.
 if [ ! -e "$APP" ] && { [ -z "$LEGACY_APP" ] || [ ! -d "$LEGACY_APP" ] || [[ "$LEGACY_APP" != *.app ]]; }; then
-  running=$(desktop_pids | head -1 | cut -d' ' -f2-)
+  # Whole output, then its first line: `| head -1` would SIGPIPE the producer under pipefail.
+  running=$(desktop_pids); running=${running%%$'\n'*}; running=${running#* }
   if [ -n "$running" ]; then
     warn_or_fail "a DSH Desktop runs ($running) but ROLLOUT_LEGACY_APP does not name it — set it in the config"
   fi
@@ -111,7 +112,7 @@ step "quit DSH Desktop"
 stop_test_instance
 quit_bundle "$APP"
 quit_bundle "$LEGACY_APP"
-remaining=$(desktop_pids | head -1)
+remaining=$(desktop_pids); remaining=${remaining%%$'\n'*}
 if [ -n "$remaining" ]; then
   fail "another DSH Desktop still runs: ${remaining#* } (pid ${remaining%% *}) — quit it, then deploy again; nothing installed"
 fi

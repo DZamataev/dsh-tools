@@ -310,6 +310,18 @@ check "deploy refuses while another DSH Desktop still runs, installing nothing" 
 check "state: other_desktops names the other DSH Desktop only" '[ "$(st other_desktops)" = "$SB/Other.app" ]'
 out=$(ROLLOUT_LEGACY_APP="$SB/Other.app" st other_desktops)
 check "state: the legacy app is not an other desktop"    '[ -z "$out" ]'
+# Several desktop processes at once (a Desktop's Host child runs the same executable): the
+# refusal must still name one, not die on a broken pipe.
+mkdesk "$SB/Other2.app" com.deepseek.benchharness
+"$SB/Other.app/Contents/MacOS/DeepSeek Harness" 120 & opid2=$!
+"$SB/Other2.app/Contents/MacOS/DeepSeek Harness" 120 & opid3=$!; sleep 0.5
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy refuses with the named message while several DSH Desktop processes run" \
+  '[[ $out == *"DEPLOY FAILED: another DSH Desktop still runs: "*"quit it, then deploy again; nothing installed"* && $out != *"exited 141"* ]] && [ -f "$APPDIR/DeepSeek Harness.app/Contents/marker" ]'
+out=$(ROLLOUT_APP="$SB/NoApp.app" "$S/deploy.sh" --no-relaunch 2>&1)
+check "cutover refuses with the named message while several DSH Desktop processes run" \
+  '[[ $out == *"DEPLOY FAILED: a DSH Desktop runs ("*") but ROLLOUT_LEGACY_APP does not name it"* && $out != *"exited 141"* ]]'
+kill "$opid2" "$opid3"; wait "$opid2" "$opid3" 2>/dev/null
 kill "$opid"; wait "$opid" 2>/dev/null
 out=$("$S/deploy.sh" --no-relaunch 2>&1)
 check "deploy ignores a running bundle with another identifier" '[[ $out == *"DEPLOY OK: live"* ]] && kill -0 '"$fpid"
