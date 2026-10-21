@@ -186,12 +186,15 @@ DSH may run it.
 8. **Test instance** (skipped by `--no-app`, recorded `app=false`; the artifact is still built,
    so the sha stays deployable). `<exe>` is the bundle's `CFBundleExecutable`:
    - Stop the previous one.
-   - Launch `env -u` every `DSH_*` and `ELECTRON_*` variable, plus `DSH_HOME=$ROLLOUT_TEST_HOME`:
-     `nohup "<artifact>/Contents/MacOS/<exe>" --user-data-dir=$ROLLOUT_TEST_HOME/electron-user-data`
-     with output to `instance.log`, disowned. Clearing the environment is required: from an agent
-     inside live it would otherwise inherit `DSH_PROFILE_DIR=~/.dsh/profiles/desktop`.
-   - Wait up to 120 s until the process at the artifact path listens on TCP. An exit or timeout is
-     `FAILED` naming `instance.log`.
+   - Launch through LaunchServices, with every `DSH_*` and `ELECTRON_*` variable removed from the
+     caller's environment: `open -n -a <artifact> --env DSH_HOME=$ROLLOUT_TEST_HOME --stdout
+     instance.log --stderr instance.log --args --user-data-dir=$ROLLOUT_TEST_HOME/electron-user-data`.
+     launchd becomes the parent, so the instance outlives the agent's shell command, and an agent
+     inside live cannot pass it `DSH_PROFILE_DIR=~/.dsh/profiles/desktop`.
+   - Wait up to 120 s until a process at the artifact path listens on TCP. An exit or timeout is
+     `FAILED` naming `instance.log`. Then `$ROLLOUT_TEST_HOME/electron-user-data/SingletonLock`
+     must exist: otherwise the app ignored `--user-data-dir` and would share live's single-instance
+     lock.
 9. **Stamp**: write `verified`. Result line:
    `VERIFY OK: develop <short sha> verified (tests=…, app=…). Check the test window, then deploy.sh [--push]; stop it with verify.sh --stop`.
 
@@ -217,8 +220,10 @@ An existing seed is kept unless `--reseed`; `.credentials.yaml` is never copied,
    - `develop` sha equals the `verified` sha; otherwise refuse (`--unverified` only on the
      operator's word). The dry run warns instead.
    - The artifact exists and passes `codesign --verify --deep --strict`.
-2. **Live turns** in `~/.dsh` and `~/.dsh-dev`: open turns refuse the deploy
-   (`--ignore-live-turns` only on the operator's word). The dry run lists them.
+2. **Live turns** in the homes whose windows deploy closes: `~/.dsh` while the live or legacy app
+   runs, `~/.dsh-dev` while the test instance runs (a closed home's open turn is a crash leftover).
+   Open turns refuse the deploy (`--ignore-live-turns` only on the operator's word). The dry run
+   lists them.
 3. **Dry run**:
    - prints the plan (quit, install, hook, relaunch, pushes);
    - inside DSH, also the command the operator runs;
