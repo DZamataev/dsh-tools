@@ -150,6 +150,17 @@ check "a conflict leaves develop clean (aborted)"       '[ -z "$(git -C "$SB/for
 git -C "$WT/clean" reset -q --hard develop
 git -C "$SB/fork" branch -q -D feat/conflict
 
+# ── verify.sh ──
+mkbundle "$TEST/artifacts/def456/DeepSeek Harness.app"
+"$TEST/artifacts/def456/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" 120 & tpid=$!; sleep 0.5
+out=$("$S/verify.sh" --stop 2>&1)
+check "verify --stop stops the test instance"           '[[ $out == *"VERIFY OK: test instance stopped"* ]] && ! kill -0 '"$tpid"' 2>/dev/null'
+wait "$tpid" 2>/dev/null; rm -rf "$TEST/artifacts/def456"
+out=$("$S/verify.sh" --bogus 2>&1)
+check "verify rejects an unknown argument"              '[[ $out == *"VERIFY FAILED: unknown argument: --bogus"* ]]'
+out=$(ROLLOUT_SIGN_IDENTITY= "$S/verify.sh" --no-tests 2>&1)
+check "verify requires a sign identity"                 '[[ $out == *"VERIFY FAILED: ROLLOUT_SIGN_IDENTITY is not set"* ]]'
+
 # ── summary ──
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
