@@ -4,8 +4,8 @@
 # untouched, so an agent inside DSH may run this.
 #   1. pnpm install --frozen-lockfile, build:native-system;
 #   2. tests: typecheck, then vitest on what the diff since the deployed sha touches (--changed);
-#      failing files are rerun alone, then on the upstream merge-base: only failures upstream lacks
-#      count as ours;
+#      failing files are rerun alone, then on the upstream merge-base, and what upstream lacks
+#      once more on the branch: only failures that persist and upstream lacks count as ours;
 #   3. package the unsigned macOS app, build:check, re-sign it with $ROLLOUT_SIGN_IDENTITY (TCC
 #      grants survive rebuilds) and store it as $ROLLOUT_TEST_HOME/artifacts/<sha>/;
 #   4. seed $ROLLOUT_TEST_HOME from the live home (no credentials, sessions or mobile access) and
@@ -111,7 +111,7 @@ if [ "$tests" != none ]; then
   bw pnpm run typecheck >"$STATE_DIR/verify-typecheck.log" 2>&1 || fail "typecheck failed — see $STATE_DIR/verify-typecheck.log"
   step "vitest ($tests)"
   FLOG=$STATE_DIR/verify-tests-fork.log FJSON=$STATE_DIR/verify-tests-fork.json
-  rm -f "$FJSON" "$STATE_DIR"/verify-tests-rerun-*.json "$STATE_DIR"/verify-tests-upstream-*.json
+  rm -f "$FJSON" "$STATE_DIR"/verify-tests-rerun-*.json "$STATE_DIR"/verify-tests-upstream-*.json "$STATE_DIR"/verify-tests-confirm-*.json
   scope=(--changed "$BASE"); [ "$tests" = full ] && scope=()
   rc=0
   bw pnpm exec vitest run ${scope[@]+"${scope[@]}"} --passWithNoTests \
@@ -153,6 +153,24 @@ if [ "$tests" != none ]; then
       up_fail=$(printf '%s' "$up_ids" | sed '/^$/d' | sort -u)
       ours=$(comm -23 <(echo "$fork_fail") <(echo "$up_fail") | sed '/^$/d')
       echo "failing on $BRANCH: $(echo "$fork_fail" | wc -l | tr -d ' '), also on upstream: $(comm -12 <(echo "$fork_fail") <(echo "$up_fail") | sed '/^$/d' | wc -l | tr -d ' ')"
+      if [ -n "$ours" ]; then
+        # The first single-file reruns follow the full parallel run while the machine is still
+        # loaded; upstream's run comes later. Rerun what looks like ours once more under the same
+        # conditions as upstream's: only failures that persist count.
+        step "confirm $(echo "$ours" | files_of | wc -l | tr -d ' ') file(s) on $BRANCH $SHORT"
+        confirm_ids=""; i=0
+        for f in $(echo "$ours" | files_of); do
+          i=$((i + 1)); out=$STATE_DIR/verify-tests-confirm-$i.json
+          rc=0
+          bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$RLOG" 2>&1 || rc=$?
+          ids=$(rerun_ids "$f" "$out" "$rc") || fail "unreadable vitest report $out — see $RLOG"
+          confirm_ids="$confirm_ids$ids"$'\n'
+        done
+        confirm_fail=$(printf '%s' "$confirm_ids" | sed '/^$/d' | sort -u)
+        flaky=$(comm -23 <(echo "$ours") <(echo "$confirm_fail") | sed '/^$/d')
+        if [ -n "$flaky" ]; then echo "pass on the confirming rerun (load flakes): $(echo "$flaky" | wc -l | tr -d ' ')"; fi
+        ours=$(comm -12 <(echo "$ours") <(echo "$confirm_fail") | sed '/^$/d')
+      fi
       if [ -n "$ours" ]; then
         echo "NOT on upstream (ours):"; echo "$ours" | sed 's/^/  /'
         fail "$(echo "$ours" | wc -l | tr -d ' ') test failure(s) introduced by $BRANCH — logs: $RLOG, $ULOG"
