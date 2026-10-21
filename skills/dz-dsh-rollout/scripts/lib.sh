@@ -57,9 +57,37 @@ ok() {
 # shellcheck disable=SC2154  # rc is assigned inside the trap body
 trap 'rc=$?; [ $rc -eq 0 ] || { echo "$TAG FAILED: line $LINENO exited $rc"; notify "failed (line $LINENO)"; }' EXIT
 
+# A directory's physical path; a missing one keeps its configured string (minus a trailing slash).
+canon_path() {
+  if [ -d "$1" ]; then (cd "$1" && pwd -P); else printf '%s\n' "${1%/}"; fi
+}
+# The physical git common dir of a checkout or worktree ($1), empty when it is not one.
+git_common_dir() {
+  local d
+  d=$(git -C "$1" rev-parse --git-common-dir 2>/dev/null) || return 0
+  case $d in /*) ;; *) d=$1/$d ;; esac
+  canon_path "$d"
+}
+# Misplaced paths make verify or deploy act on the wrong tree or home.
+require_distinct_paths() {
+  local live test fork build
+  live=$(canon_path "$LIVE_HOME"); test=$(canon_path "$TEST_HOME")
+  if [ "$live" = "$test" ] || [[ "$live/" == "$test/"* ]] || [[ "$test/" == "$live/"* ]]; then
+    fail "ROLLOUT_TEST_HOME and ROLLOUT_LIVE_HOME overlap: $test and $live"
+  fi
+  [ -n "$BUILD_WT" ] || return 0
+  fork=$(canon_path "$FORK"); build=$(canon_path "$BUILD_WT")
+  if [ "$build" = "$fork" ] || [[ "$build/" == "$fork/"* ]]; then
+    fail "ROLLOUT_BUILD_WT must be a separate worktree, not the fork checkout: $build"
+  fi
+  if [ -e "$BUILD_WT/.git" ] && [ "$(git_common_dir "$BUILD_WT")" != "$(git_common_dir "$FORK")" ]; then
+    fail "ROLLOUT_BUILD_WT is not a worktree of ROLLOUT_FORK: $build"
+  fi
+}
 require_config() {
   [ -n "$FORK" ] || fail "ROLLOUT_FORK is not set — copy templates/config.sh to $ROLLOUT_CONFIG and fill it in"
   [ -e "$FORK/.git" ] || fail "ROLLOUT_FORK is not a git checkout: $FORK"
+  require_distinct_paths
   mkdir -p "$STATE_DIR"
 }
 require_build_config() {

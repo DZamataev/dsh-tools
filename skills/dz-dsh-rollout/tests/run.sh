@@ -183,6 +183,24 @@ out=$(ROLLOUT_WT_ROOT= "$S/merge.sh" --dry-run 2>&1)
 check "env var overrides the config file (all worktrees)" '[[ $out == *"to merge: outside/x"* && $out != *"rollout-build"* ]]'
 out=$(ROLLOUT_CONFIG="$SB/none.sh" ROLLOUT_FORK= "$S/merge.sh" --dry-run 2>&1)
 check "missing config is reported"                      '[[ $out == *"MERGE FAILED: ROLLOUT_FORK is not set"* ]]'
+out=$(ROLLOUT_TEST_HOME="$LIVE" "$S/merge.sh" --dry-run 2>&1)
+check "config: the same live and test home is refused"  '[[ $out == *"MERGE FAILED: ROLLOUT_TEST_HOME and ROLLOUT_LIVE_HOME overlap: "* ]]'
+out=$(ROLLOUT_TEST_HOME="$LIVE/nested" "$S/merge.sh" --dry-run 2>&1)
+check "config: a test home inside the live home is refused" '[[ $out == *"ROLLOUT_TEST_HOME and ROLLOUT_LIVE_HOME overlap: "* ]]'
+out=$(ROLLOUT_LIVE_HOME="$TEST/nested" "$S/merge.sh" --dry-run 2>&1)
+check "config: a live home inside the test home is refused" '[[ $out == *"ROLLOUT_TEST_HOME and ROLLOUT_LIVE_HOME overlap: "* ]]'
+ln -s "$LIVE" "$SB/live-link"
+out=$(ROLLOUT_TEST_HOME="$SB/live-link" "$S/merge.sh" --dry-run 2>&1)
+check "config: overlap is judged on resolved paths"     '[[ $out == *"ROLLOUT_TEST_HOME and ROLLOUT_LIVE_HOME overlap: "* ]]'
+out=$(ROLLOUT_BUILD_WT="$SB/fork" "$S/merge.sh" --dry-run 2>&1)
+check "config: the fork checkout as build worktree is refused" '[[ $out == *"MERGE FAILED: ROLLOUT_BUILD_WT must be a separate worktree, not the fork checkout: "* ]]'
+out=$(ROLLOUT_BUILD_WT="$SB/fork/build" "$S/merge.sh" --dry-run 2>&1)
+check "config: a build worktree inside the fork is refused" '[[ $out == *"ROLLOUT_BUILD_WT must be a separate worktree, not the fork checkout: "* ]]'
+git init -q "$SB/otherrepo"
+out=$(ROLLOUT_BUILD_WT="$SB/otherrepo" "$S/merge.sh" --dry-run 2>&1)
+check "config: a build worktree of another repository is refused" '[[ $out == *"MERGE FAILED: ROLLOUT_BUILD_WT is not a worktree of ROLLOUT_FORK: "* ]]'
+out=$("$S/merge.sh" --dry-run 2>&1)
+check "config: the regular worktree passes"             '[[ $out == *"MERGE OK"* ]]'
 out=$("$S/merge.sh" --upstream 2>&1)
 check "merge.sh --upstream succeeds"                    '[[ $out == *"MERGE OK"* ]]'
 check "upstream merged into develop"                    '[ -f "$SB/fork/up.txt" ]'
