@@ -172,11 +172,18 @@ stop_test_instance() {
 # The ordinary quit (as ⌘Q): DSH asks for confirmation itself while tasks run. Addressed by path;
 # stop the test instance first, it shares the bundle id.
 quit_bundle() {  # $1 = bundle
+  local err rc=0
   [ -n "${1:-}" ] || return 0
   [ -n "$(bundle_pids "$1")" ] || return 0
-  osascript -e "tell application \"$1\" to quit" >/dev/null 2>&1 || true
+  err=$(osascript -e "tell application \"$1\" to quit" 2>&1 >/dev/null) || rc=$?
+  if [ $rc -ne 0 ]; then
+    if [[ "$err" == *-1743* ]]; then
+      fail "macOS refused the Apple event to quit $1 — allow your terminal to control it in System Settings → Privacy & Security → Automation, then deploy again; nothing installed"
+    fi
+    fail "osascript could not quit $1: $(printf '%s\n' "$err" | head -1) — nothing installed"
+  fi
   for _ in $(seq 1 "${ROLLOUT_QUIT_TIMEOUT:-120}"); do [ -n "$(bundle_pids "$1")" ] || return 0; sleep 1; done
-  fail "$1 is still running after ${ROLLOUT_QUIT_TIMEOUT:-120} s (quit cancelled in its dialog?) — nothing installed"
+  fail "$1 is still running after ${ROLLOUT_QUIT_TIMEOUT:-120} s — answer or dismiss its quit dialog (Quit only if nothing runs), then deploy again; nothing installed"
 }
 
 # ── turns ─────────────────────────────────────────────────────────────────────────────────────

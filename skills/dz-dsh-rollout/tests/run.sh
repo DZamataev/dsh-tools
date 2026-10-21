@@ -118,6 +118,25 @@ check "stop_test_instance: stops it"                     '! kill -0 '"$tpid"' 2>
 wait "$tpid" 2>/dev/null
 rm -rf "$TEST/artifacts/abc123"
 
+# ── lib: quit_bundle reports osascript errors (a fake osascript; never the real one) ──
+FAKEBIN="$SB/fakebin"; mkdir -p "$FAKEBIN"
+mkbundle "$SB/Quit.app"; "$SB/Quit.app/Contents/MacOS/DeepSeek Harness" 120 & qpid=$!; sleep 0.5
+printf '#!/bin/sh\necho "execution error: Not authorized to send Apple events to X. (-1743)" >&2\nexit 1\n' > "$FAKEBIN/osascript"
+chmod +x "$FAKEBIN/osascript"
+start=$SECONDS; out=$(PATH="$FAKEBIN:$PATH" lib quit_bundle "$SB/Quit.app" 2>&1); rc=$?
+check "quit_bundle: a refused Apple event (-1743) fails at once with the Automation hint" \
+  '[ $rc -ne 0 ] && [ $((SECONDS - start)) -lt 10 ] && [[ $out == *"macOS refused the Apple event to quit $SB/Quit.app — allow your terminal to control it in System Settings → Privacy & Security → Automation, then deploy again; nothing installed"* ]]'
+printf '#!/bin/sh\necho "boom: no such app" >&2\necho second >&2\nexit 2\n' > "$FAKEBIN/osascript"
+start=$SECONDS; out=$(PATH="$FAKEBIN:$PATH" lib quit_bundle "$SB/Quit.app" 2>&1); rc=$?
+check "quit_bundle: another osascript error names its first stderr line" \
+  '[ $rc -ne 0 ] && [ $((SECONDS - start)) -lt 10 ] && [[ $out == *"osascript could not quit $SB/Quit.app: boom: no such app — nothing installed"* && $out != *second* ]]'
+printf '#!/bin/sh\nexit 0\n' > "$FAKEBIN/osascript"
+out=$(PATH="$FAKEBIN:$PATH" ROLLOUT_QUIT_TIMEOUT=2 lib quit_bundle "$SB/Quit.app" 2>&1); rc=$?
+check "quit_bundle: a quit that does not happen times out with the dialog hint" \
+  '[ $rc -ne 0 ] && [[ $out == *"$SB/Quit.app is still running after 2 s — answer or dismiss its quit dialog (Quit only if nothing runs), then deploy again; nothing installed"* ]]'
+kill "$qpid"; wait "$qpid" 2>/dev/null
+rm -f "$FAKEBIN/osascript"
+
 # ── lib: test home seed ──
 SRC="$SB/seed-src"; DST="$SB/seed-dst"
 mkdir -p "$SRC/profiles/desktop/node_modules/@local" "$SRC/storages" "$SRC/sessions/p/s" "$SRC/mobile-access" "$SRC/profiles/web" "$SB/plugin-target"
