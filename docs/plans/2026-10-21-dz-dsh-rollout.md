@@ -1795,7 +1795,7 @@ codesign -d -r- ~/Applications/"DeepSeek Harness.app" 2>&1 | grep designated
 grep dsh-provider-limits ~/.dsh/profiles/desktop/package.json
 tail -5 ~/.dsh/logs/rollout/deployed
 ```
-Expected: `live=app`, `deployed=<develop sha> …`, `mode=cutover` until `ROLLOUT_LEGACY_APP` is emptied; the requirement names the team; the profile links `link:/Users/frenzy/dev/dsh-tools/plugins/provider-limits`.
+Expected: `live=app`, `deployed=<develop sha> …`, `mode=rollout` (the app is present and the legacy build no longer runs; emptying `ROLLOUT_LEGACY_APP` is still done in step 3); the requirement names the team; the profile links `link:/Users/frenzy/dev/dsh-tools/plugins/provider-limits`.
 
 - [ ] **Step 3: [operator yes] Clear the legacy app**
 

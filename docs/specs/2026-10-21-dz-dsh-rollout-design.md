@@ -93,6 +93,17 @@ variables of the same name win over the file.
 | `ROLLOUT_POST_DEPLOY` | `~/dev/dsh-tools/plugins/install.sh` | command run after install, app closed |
 | `ROLLOUT_KEEP_ARTIFACTS` | `3` | verified artifacts kept besides the deployed one |
 
+`require_config` (merge, verify, deploy) also checks the paths:
+
+- `ROLLOUT_TEST_HOME` and `ROLLOUT_LIVE_HOME` resolve (`pwd -P`) to different directories, neither
+  inside the other: `ROLLOUT_TEST_HOME and ROLLOUT_LIVE_HOME overlap: …`;
+- `ROLLOUT_BUILD_WT` (when set) is neither the fork checkout nor inside it: `ROLLOUT_BUILD_WT must be
+  a separate worktree, not the fork checkout: …`; when it exists, its git common dir equals the
+  fork's: `ROLLOUT_BUILD_WT is not a worktree of ROLLOUT_FORK: …`.
+
+`ROLLOUT_BUNDLE_ID` (default `com.deepseek.harness`) is the identifier prefix that marks a bundle as a
+DSH Desktop in the process checks below; the bench sets another prefix to stay clear of the real app.
+
 ## State
 
 - `~/.dsh/logs/rollout/verified`: `<sha> <date> tests=changed|full|none artifact=<path>`.
@@ -115,6 +126,10 @@ variables of the same name win over the file.
   - live: `$ROLLOUT_APP/Contents/MacOS/*`;
   - test: `$ROLLOUT_TEST_HOME/artifacts/*/*.app/Contents/MacOS/*`;
   - legacy: `$ROLLOUT_LEGACY_APP/Contents/MacOS/Electron`.
+  - any DSH Desktop (`desktop_pids`): a process whose executable sits directly in
+    `<bundle>.app/Contents/MacOS/` and whose bundle's `Contents/Info.plist` `CFBundleIdentifier`
+    (`PlistBuddy`, read once per bundle) starts with `com.deepseek.harness`. It prints
+    `<pid> <bundle path>`.
   Helper processes live under `Contents/Frameworks/` and never match.
 - **Live turns**: for each `session.v4.jsonl.zstd` under `<home>/sessions/` modified within the
   last 12 hours, the last line starting `{"type":"turn/start"` without a later line starting
@@ -127,12 +142,14 @@ variables of the same name win over the file.
 
 Prints `key=value` lines:
 
-- `harness` (`dsh-desktop`, `claude-code`, `codex`, `unknown`) and `inside_dsh`;
+- `harness` (`dsh`, `claude-code`, `codex`, `unknown`) and `inside_dsh`;
 - fork branch and sha;
 - `develop` ahead/behind `$ROLLOUT_UPSTREAM`, and each worktree branch's commits ahead of `develop`;
 - the `verified` and `deployed` stamps, and whether `verified` matches `develop`;
 - the running live app (`app`, `legacy` or `none`) with its pid, and whether `$ROLLOUT_APP` exists;
 - whether the test instance runs, and its sha;
+- `other_desktops`: the bundles of the DSH Desktops that run besides `$ROLLOUT_APP`, `$ROLLOUT_LEGACY_APP`
+  and the test artifacts, comma-separated, empty when none;
 - open turns in both homes;
 - `mode`:
   - `initial-setup`: no config or no `develop`;
@@ -158,10 +175,14 @@ All work happens in `$ROLLOUT_BUILD_WT`; the checkout and live stay untouched, s
 DSH may run it.
 
 1. **Preconditions**: config, `develop` clean, `SHA=$(git rev-parse develop)`.
+   - A `verified` stamp naming `SHA` is removed (`previous verified stamp for <short> cleared`): a
+     rebuild of the sha is evidence again only when this run ends well.
    - Create the build worktree when missing (`git worktree add --detach $ROLLOUT_BUILD_WT $SHA`),
      else `checkout --detach $SHA`.
    - Tracked files must be clean.
-2. **Dependencies**: `pnpm install --frozen-lockfile`, then `pnpm run build:native-system`.
+2. **Dependencies**: `pnpm install --frozen-lockfile`, then `pnpm run build:native-system`. Builds
+   and tests run with `DSH_HOME` set to a per-run `mktemp -d` directory (removed after a successful
+   run), so code that falls back to `~/.dsh` never touches live.
 3. **Tests** (skipped by `--no-tests`, recorded `tests=none`):
    - `pnpm run typecheck`;
    - `vitest run --changed <base>`, where base is `--since`, else `deployed`, else the upstream
@@ -173,8 +194,9 @@ DSH may run it.
 4. **Package**: `pnpm run package:desktop:mac:arm64:unsigned --dir`, locate the unpacked `.app`
    under `apps/desktop/.desktop-build/targets/mac-arm64/`, then `pnpm run build:check`.
 5. **Sign**:
-   - Re-sign inside-out with `$ROLLOUT_SIGN_IDENTITY`, `--force`, no `--options runtime`: nested
-     Mach-O files, then helpers and frameworks, then the bundle.
+   - Re-sign with `codesign --force --deep --timestamp=none --sign $ROLLOUT_SIGN_IDENTITY`, no
+     `--options runtime`. `--deep` signs nested bundles in code locations; Mach-O files under
+     `Contents/Resources` keep their packaging signatures.
    - `codesign --verify --deep --strict` must pass.
    - The designated requirement must name `identifier "com.deepseek.harness"` and the certificate
      OU `68QJJA7HK9`.
@@ -185,7 +207,8 @@ DSH may run it.
 7. **Seed** `$ROLLOUT_TEST_HOME` (first run or `--reseed`; see below).
 8. **Test instance** (skipped by `--no-app`, recorded `app=false`; the artifact is still built,
    so the sha stays deployable). `<exe>` is the bundle's `CFBundleExecutable`:
-   - Stop the previous one.
+   - Stop the previous one, and remove a stale `SingletonLock` so the check below proves this
+     launch created it.
    - Launch through LaunchServices, with every `DSH_*` and `ELECTRON_*` variable removed from the
      caller's environment: `open -n -a <artifact> --env DSH_HOME=$ROLLOUT_TEST_HOME --stdout
      instance.log --stderr instance.log --args --user-data-dir=$ROLLOUT_TEST_HOME/electron-user-data`.
@@ -219,13 +242,20 @@ An existing seed is kept unless `--reseed`; `.credentials.yaml` is never copied,
    - `develop` clean.
    - `develop` sha equals the `verified` sha; otherwise refuse (`--unverified` only on the
      operator's word). The dry run warns instead.
-   - The artifact exists and passes `codesign --verify --deep --strict`.
+   - The artifact exists, passes `codesign --verify --deep --strict` and satisfies
+     `requirement_ok` for `$ROLLOUT_SIGN_IDENTITY` (a set identity is required): `artifact <path> is
+     not signed by <identity> (run verify.sh)`. The dry run warns instead.
+   - When `$ROLLOUT_APP` does not exist (cutover) and `$ROLLOUT_LEGACY_APP` is not an existing `.app`
+     directory, no `desktop_pids` process may run: `a DSH Desktop runs (<bundle>) but
+     ROLLOUT_LEGACY_APP does not name it — set it in the config`. The dry run warns instead.
 2. **Live turns** in the homes whose windows deploy closes: `~/.dsh` while the live or legacy app
    runs, `~/.dsh-dev` while the test instance runs (a closed home's open turn is a crash leftover).
    Open turns refuse the deploy (`--ignore-live-turns` only on the operator's word). The dry run
    lists them.
 3. **Dry run**:
    - prints the plan (quit, install, hook, relaunch, pushes);
+   - lists each other DSH Desktop (`desktop_pids` bundles besides `$ROLLOUT_APP`,
+     `$ROLLOUT_LEGACY_APP` and test artifacts) as `WARNING: another DSH Desktop runs: <bundle>`;
    - inside DSH, also the command the operator runs;
    - then `DEPLOY OK: dry run`.
 4. **`--push`**: `git push origin develop`; a failure stops with nothing deployed.
@@ -236,15 +266,23 @@ An existing seed is kept unless `--reseed`; `.credentials.yaml` is never copied,
      asks for confirmation itself while tasks run.
    - Wait 120 s per app. A process still alive (the operator chose Cancel) is `FAILED` with nothing
      installed.
+   - An `osascript` error fails at once: status -1743 (macOS Automation refused the Apple event)
+     names System Settings → Privacy & Security → Automation; any other error quotes the first
+     stderr line.
+   - Then any remaining `desktop_pids` process is `FAILED`: `another DSH Desktop still runs:
+     <bundle> (pid <pid>) — quit it, then deploy again; nothing installed`.
 6. **Install**:
    - `ditto` the artifact to `$ROLLOUT_APP.new`;
    - rename the current bundle to `$ROLLOUT_APP.old`;
    - rename `.new` into place;
    - remove `.old`.
    A failure after the first rename restores `.old`.
-7. **Post-deploy hook**: `$ROLLOUT_POST_DEPLOY` with `ROLLOUT_LIVE_HOME`, `ROLLOUT_TEST_HOME` and
-   `ROLLOUT_APP` in its environment; a failure is `FAILED` after install (the app stays closed).
-8. **Stamp** `deployed`; `open "$ROLLOUT_APP"` unless `--no-relaunch`. Opening re-registers `dsh://`.
+7. **Stamp** `deployed` right after the install, before the hook.
+8. **Post-deploy hook**: `$ROLLOUT_POST_DEPLOY` with `ROLLOUT_LIVE_HOME`, `ROLLOUT_TEST_HOME` and
+   `ROLLOUT_APP` in its environment; a failure is `FAILED` after install (the app stays installed
+   and closed; fix the profile, run the hook command by hand, open the app). Then `open
+   "$ROLLOUT_APP"` with every `DSH_*` and `ELECTRON_*` variable removed, unless `--no-relaunch`.
+   Opening re-registers `dsh://`.
 9. **`--push`**: push every worktree branch to `origin`, never forced. A rejection is reported in
    the result line, not fatal.
 
@@ -258,7 +296,10 @@ Result: `DEPLOY OK: live <short sha>[, develop pushed][, worktree branches pushe
   (`Contents/Resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs`, run with the app's
   Node). The implementation plan's first task proves the exact invocation against a copy of the
   live profile before the hook is written.
-- Idempotent: a profile already pointing at dsh-tools is left as is. Runs only while the app is closed.
+- Idempotent: a profile already pointing at dsh-tools is left as is. Refuses (exit 1) while any DSH
+  Desktop runs (same executable and `CFBundleIdentifier` test as `desktop_pids`;
+  `PLUGINS_ALLOW_RUNNING_DESKTOP=1` disables it for the bench). The rewritten `package.json` keeps
+  its file mode.
 
 ## Initial setup (`references/setup.md`)
 
@@ -317,6 +358,10 @@ A mktemp sandbox; it never starts or quits a real app.
   path is not.
 - seed: allowed files copied; `.credentials.yaml`, `mobile-access/` and `sessions/` absent.
 - `state.sh`: modes `initial-setup`, `cutover`, `rollout`; harness detection.
+- other DSH Desktops: fake bundles with an `Info.plist` identifier under the DSH prefix block the
+  deploy and `plugins/install.sh`; another identifier does not.
+- `quit_bundle` against a fake `osascript` (never the real one).
+- config guards, signing refusal, `--help` output.
 - `install.sh`: every target into a fake `HOME`.
 
 ## Known consequences
@@ -325,4 +370,8 @@ A mktemp sandbox; it never starts or quits a real app.
   persist while the certificate stays the same.
 - The test instance claims `dsh://` while it runs; the live relaunch after deploy reclaims it.
 - Two bundles share `com.deepseek.harness` (live and the test artifact). TCC grants are shared,
-  because the signer is the same.
+  because the signer is the same. So is the state keyed by the bundle id:
+  `~/Library/Preferences/com.deepseek.harness.plist`, Saved Application State, and the crash reports
+  in `~/Library/Logs/DeepSeek Harness`, which both instances prune.
+- The first quit asks macOS once for permission to control the app (Automation). Refusing it fails
+  the deploy with nothing installed.

@@ -26,8 +26,10 @@ their machine waits for their explicit yes; ask one at a time.
 ## Integration branch
 
 1. `git -C <fork> branch develop <upstream remote>/<branch>` and `git -C <fork> switch develop`.
-   The checkout must be clean. Switching branches does not touch a running dev build: it executes
-   the built `lib/`, which the switch leaves alone.
+   The checkout must be clean. Switching and merging leave the built `lib/` alone, but the dev build
+   resolves package exports and reads some tracked assets (prompts, skills, JSON) lazily from the
+   checkout, so a large merge can break lazy loads in the running dev live until the cutover: do
+   the merges right before the first verify and the cutover.
 2. A feature branch without a worktree (checked out in the fork until now): merge it once by hand,
    `git -C <fork> merge --no-ff <branch>`.
 3. `merge.sh --dry-run`, then `merge.sh`.
@@ -40,7 +42,12 @@ The first deploy moves live from the dev build to `ROLLOUT_APP`.
    bundle launches and honors `--user-data-dir`.
 2. The operator runs `deploy.sh` from Terminal or Ghostty (the command `deploy.sh --dry-run`
    prints). It quits the dev build (ordinary quit, so it confirms running tasks), installs the app,
-   runs `plugins/install.sh`, opens the app.
+   runs `plugins/install.sh`, opens the app. macOS asks once whether the terminal may control
+   "Harness Dev" (Automation): allow it, because refusing fails the deploy with nothing installed.
+   The first rollout deploy asks again for "DeepSeek Harness".
+   Deploy also refuses while another DSH Desktop runs (a different build, a second dev build):
+   without `ROLLOUT_LEGACY_APP` naming the running dev build it stops before quitting anything, and
+   after the quits it stops while any DSH Desktop is left. Quit it, then deploy again.
 3. The operator grants TCC permissions to the new app once (System Settings → Privacy & Security).
 4. Check:
    - sessions from `~/.dsh` are listed;

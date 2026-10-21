@@ -75,8 +75,9 @@ Ghostty once their DSH turns are done.
    - From inside DSH, hand over the command (see Start).
    - It refuses while a turn runs in a window it closes. The app also asks itself on quit; a
      Cancel there fails the deploy with nothing installed.
-   - Afterwards check: `state.sh` (`deployed` = develop, `live=app`); `codesign -d -r-` of the app
-     names the team; the operator's chat works. Report the deployed sha.
+   - Afterwards check: compare `deployed` from `state.sh` with `git -C <fork> rev-parse develop`;
+     `live=app` after the relaunch; `codesign -d -r-` of the app names the team; the operator's
+     chat works. Report the deployed sha.
 
 ## Rules
 
@@ -115,12 +116,25 @@ app → `--push` worktree branches.
   there. API keys come from the seeded `.env`. `verify.sh --reseed` refreshes the seed from live.
 - **Desktop never runs pnpm at startup**: a plugin change in a profile needs the app closed and
   `plugins/install.sh` (deploy runs it).
-- **`zstd` is required.** Open turns are read from `session.v4.jsonl.zstd`; without `zstd` on PATH,
-  deploy refuses ("cannot read open turns") and state.sh prints `open_turns=unknown` (`brew install zstd`).
-- **An unfinished plugin relink** leaves `profiles/desktop/package.json.dz-relink.bak`; the next
-  `plugins/install.sh` (deploy's hook) restores it only when package.json is still exactly its own
-  rewrite, and otherwise stops with "changed after an unfinished relink": compare the two files,
-  keep the right one, remove the backup, deploy again.
+- **`zstd` is required.** Open turns are read from `session.v*.jsonl.zstd`, and deploy reads them
+  only for the windows it closes; without `zstd` on PATH, deploy refuses ("cannot read open turns")
+  when it must read a home, and state.sh prints `open_turns=unknown` (`brew install zstd`).
+- **An unfinished plugin relink** leaves `profiles/desktop/package.json.dz-relink.bak` in the live
+  or test home; the next `plugins/install.sh` restores it only when package.json is still exactly
+  its own rewrite, and otherwise stops with "changed after an unfinished relink": compare the two
+  files, keep the right one, remove the backup, run the hook again.
+- **A failed post-deploy hook** leaves the new app installed and closed. Fix the profile, run
+  `~/dev/dsh-tools/plugins/install.sh` (a path in the dsh-tools repository, not in the skill), then
+  open the app. No second deploy is needed.
+- **Never run `verify.sh` from an agent inside the test window**: it stops the test instance, which
+  is that agent's own host.
+- **"another DSH Desktop still runs"** (deploy) and `plugins/install.sh: a DSH Desktop is running`:
+  a DSH Desktop other than `ROLLOUT_APP` and the legacy build holds the home. Quit it and run the
+  command again; `state.sh` names such bundles in `other_desktops`.
+- **The Automation prompt**: the first quit makes macOS ask whether the terminal may control the app
+  ("Harness Dev", later "DeepSeek Harness"). Refusing, or an earlier refusal, fails the deploy with
+  "macOS refused the Apple event" and nothing installed: allow the terminal in System Settings →
+  Privacy & Security → Automation, then deploy again.
 - **Fixing these scripts**: edit `~/dev/dsh-tools/skills/dz-dsh-rollout/`, run `bash -n` and
   `tests/run.sh`, reinstall with `skills/install.sh --target agents --force dz-dsh-rollout`, commit
   in dsh-tools; push only on the operator's word.
