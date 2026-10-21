@@ -82,6 +82,46 @@ check "an unfinished relink is relinked again, exit 0"  '[ $rc -eq 0 ] && [[ $ou
 check "an unfinished relink reruns pnpm"                '[ -f "$SB/mark" ]'
 check "an unfinished relink leaves no backup file"      '[ ! -e "$PR3/package.json.dz-relink.bak" ]'
 
+# a truncated backup never replaces an intact package.json
+H4="$SB/home4"; PR4="$H4/profiles/desktop"; mkdir -p "$PR4"
+cp "$SB/before.json" "$PR4/package.json"; printf '{ "name": "dsh-pro' > "$PR4/package.json.dz-relink.bak"
+cp "$PR4/package.json" "$SB/before4.json"; cp "$PR4/package.json.dz-relink.bak" "$SB/bak4.json"
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H4" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "a truncated backup stops the run with exit 1"    '[ $rc -eq 1 ] && [[ $out == *"$PR4/package.json changed after an unfinished relink"* ]]'
+check "a truncated backup leaves both files untouched"  'cmp -s "$PR4/package.json" "$SB/before4.json" && cmp -s "$PR4/package.json.dz-relink.bak" "$SB/bak4.json"'
+
+# edits made after an interrupted run are not discarded
+H5="$SB/home5"; PR5="$H5/profiles/desktop"; mkdir -p "$PR5"
+cat > "$PR5/package.json.dz-relink.bak" <<EOT
+{
+  "name": "dsh-profile-desktop",
+  "private": true,
+  "dependencies": {
+    "@local/a": "link:$OLD/provider-limits"
+  }
+}
+EOT
+cat > "$PR5/package.json" <<EOT
+{
+  "name": "dsh-profile-desktop",
+  "private": true,
+  "dependencies": {
+    "@local/a": "link:$P/provider-limits",
+    "left-pad": "^1.0.0"
+  }
+}
+EOT
+cp "$PR5/package.json" "$SB/before5.json"; cp "$PR5/package.json.dz-relink.bak" "$SB/bak5.json"
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H5" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "a package.json edited after an interrupted run stops the run" '[ $rc -eq 1 ] && [[ $out == *"$PR5/package.json changed after an unfinished relink"* ]] && [[ $out == *"remove the backup"* ]]'
+check "an edited package.json and the backup stay untouched" 'cmp -s "$PR5/package.json" "$SB/before5.json" && cmp -s "$PR5/package.json.dz-relink.bak" "$SB/bak5.json" && grep -q left-pad "$PR5/package.json"'
+
+# a half-written backup copy is discarded
+H6="$SB/home6"; PR6="$H6/profiles/desktop"; mkdir -p "$PR6"
+cp "$SB/before.json" "$PR6/package.json"; printf '{ "na' > "$PR6/package.json.dz-relink.bak.tmp"
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H6" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "a leftover backup temp file is removed and the run proceeds" '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]] && [ -z "$(ls "$PR6" | grep -F .bak)" ]'
+
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
 exit $FAILS
