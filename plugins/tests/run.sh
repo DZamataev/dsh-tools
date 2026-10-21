@@ -149,6 +149,12 @@ out=$(run7 env PLUGINS_ALLOW_RUNNING_DESKTOP=1); rc=$?
 check "PLUGINS_ALLOW_RUNNING_DESKTOP=1 disables the check" '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]]'
 kill "$dpid"; wait "$dpid" 2>/dev/null
 
+# package.json keeps its file mode across the rewrite
+H8="$SB/home8"; PR8="$H8/profiles/desktop"; mkdir -p "$PR8"
+cp "$SB/before.json" "$PR8/package.json"; chmod 600 "$PR8/package.json"
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H8" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "a rewritten package.json keeps mode 600" '[ $rc -eq 0 ] && grep -q "link:$P/provider-limits" "$PR8/package.json" && [ "$(stat -f %Lp "$PR8/package.json")" = 600 ]'
+
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
 exit $FAILS

@@ -290,6 +290,11 @@ check "deploy installs the artifact into the app path"  '[[ $out == *"DEPLOY OK:
 check "deploy leaves no .new or .old bundle"            '[ ! -e "$APPDIR/DeepSeek Harness.app.new" ] && [ ! -e "$APPDIR/DeepSeek Harness.app.old" ]'
 check "deploy stamps the deployed sha"                  '[ "$(cut -d" " -f1 "$LIVE/logs/rollout/deployed")" = "$FORKSHA" ]'
 check "deploy runs the post-deploy hook"                '[ "$(cat "$LIVE/hook.out" 2>/dev/null)" = hook-ran ]'
+printf '#!/bin/sh\necho "$*" > "%s/open.args"\n(env | grep -E "^(DSH|ELECTRON)_" || echo none) > "%s/open.env"\n' "$SB" "$SB" > "$FAKEBIN/open"; chmod +x "$FAKEBIN/open"
+out=$(BASH_ENV= PATH="$FAKEBIN:$PATH" ELECTRON_RUN_AS_NODE=1 DSH_HOME=/should/not/leak "$S/deploy.sh" 2>&1)
+check "deploy relaunches the app" '[[ $out == *"DEPLOY OK: live"* && "$(cat "$SB/open.args" 2>/dev/null)" == "$APPDIR/DeepSeek Harness.app" ]]'
+check "the relaunch carries no DSH_* or ELECTRON_* variable" '[ "$(cat "$SB/open.env" 2>/dev/null)" = none ]'
+rm -f "$FAKEBIN/open" "$SB/open.args" "$SB/open.env"
 
 # other DSH Desktops on the live home (a fake bundle with the DSH identifier, not $APP, not legacy)
 mkdesk "$SB/Other.app" com.deepseek.benchharness.dev.x

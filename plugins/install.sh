@@ -46,7 +46,7 @@ if [ "${PLUGINS_ALLOW_RUNNING_DESKTOP:-0}" != 1 ]; then
 fi
 
 # Node script, args: SRC DST OLD NEW. Writes SRC's package.json with link plugins moved from OLD to NEW
-# to DST (via rename, only when a link moved; otherwise DST gets SRC's bytes) and prints how many moved.
+# to DST (via rename keeping DST's file mode, only when a link moved; otherwise DST gets SRC's bytes) and prints how many moved.
 REWRITE='
   const fs = require("fs")
   const [src, dst, oldRoot, newRoot] = process.argv.slice(1)
@@ -62,6 +62,7 @@ REWRITE='
   }
   if (n > 0) {
     fs.writeFileSync(`${dst}.tmp`, JSON.stringify(pkg, null, 2) + "\n")
+    if (fs.existsSync(dst)) fs.chmodSync(`${dst}.tmp`, fs.statSync(dst).mode & 0o777)
     fs.renameSync(`${dst}.tmp`, dst)
   } else if (src !== dst) {
     fs.copyFileSync(src, dst)

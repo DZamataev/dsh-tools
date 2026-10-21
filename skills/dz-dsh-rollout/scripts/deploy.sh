@@ -129,7 +129,8 @@ fi
 
 if $relaunch; then
   step "open $APP"
-  open "$APP"
+  # shellcheck disable=SC2046  # one -u NAME pair per word
+  env $(dsh_env_unset) open "$APP"   # ELECTRON_RUN_AS_NODE from an editor terminal would start the app as plain node
 fi
 
 wt_note=""

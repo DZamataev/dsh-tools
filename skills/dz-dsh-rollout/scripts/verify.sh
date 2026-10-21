@@ -200,6 +200,7 @@ if $app; then
   ILOG=$TEST_HOME/instance.log
   mkdir -p "$TEST_HOME/electron-user-data"
   : >"$ILOG"
+  rm -f "$TEST_HOME/electron-user-data/SingletonLock"   # a symlink; the check below must see this launch's own
   # LaunchServices makes launchd the parent (the instance outlives this shell) and passes no DSH_*
   # of the caller; env -u also keeps them out of open itself.
   # shellcheck disable=SC2046  # one -u NAME pair per word
