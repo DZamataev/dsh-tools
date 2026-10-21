@@ -88,6 +88,16 @@ failed_ids() {
     }' "$@" | sort -u
 }
 files_of() { sed -E 's/ (>|\().*$//' | sort -u; }
+NO_FAILURE_ID="(failed without a test failure)"
+# Failure ids of one single-file rerun: $1 file, $2 its report, $3 its vitest exit code. A report
+# with failed tests yields those ids; a non-zero exit or a missing/empty report that yields none
+# yields "<file> $NO_FAILURE_ID", so a failed rerun always contributes an id.
+rerun_ids() {
+  local ids=""
+  if [ -s "$2" ]; then ids=$(failed_ids "$2") || return 1; fi
+  if [ -z "$ids" ] && { [ ! -s "$2" ] || [ "$3" -ne 0 ]; }; then ids="$1 $NO_FAILURE_ID"; fi
+  [ -z "$ids" ] || printf '%s\n' "$ids"
+}
 
 if [ "$tests" != none ]; then
   step "typecheck"
@@ -105,17 +115,15 @@ if [ "$tests" != none ]; then
     [ -n "$files" ] || fail "vitest exited $rc without a failure list — see $FLOG"
     step "rerun $(echo "$files" | wc -l | tr -d ' ') failing file(s) one by one"
     RLOG=$STATE_DIR/verify-tests-rerun.log; : >"$RLOG"
-    rjson=(); nor=""; i=0
+    fork_ids=""; i=0
     for f in $files; do
       i=$((i + 1)); out=$STATE_DIR/verify-tests-rerun-$i.json
       rc=0
       bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$RLOG" 2>&1 || rc=$?
-      # A rerun that exits non-zero without a report is a failure, not a pass.
-      if [ $rc -ne 0 ] && [ ! -s "$out" ]; then nor="$nor$f (no report)"$'\n'; fi
-      rjson+=("$out")
+      ids=$(rerun_ids "$f" "$out" "$rc") || fail "unreadable vitest report $out — see $RLOG"
+      fork_ids="$fork_ids$ids"$'\n'
     done
-    fork_fail=$({ printf '%s' "$nor"; failed_ids "${rjson[@]}"; } | sort -u) \
-      || fail "unreadable vitest report in the fork rerun — see $RLOG"
+    fork_fail=$(printf '%s' "$fork_ids" | sed '/^$/d' | sort -u)
     if [ -z "$fork_fail" ]; then
       echo "all pass alone: parallel-run flakes"
     else
@@ -124,19 +132,18 @@ if [ "$tests" != none ]; then
       ULOG=$STATE_DIR/verify-tests-upstream.log; : >"$ULOG"
       git -C "$BUILD_WT" checkout -q --detach "$UPBASE" || fail "checkout of the upstream base in $BUILD_WT failed"
       install_deps
-      ujson=(); unor=""; i=0
+      up_ids=""; i=0
       for f in $(echo "$fork_fail" | files_of); do
         [ -f "$f" ] || continue   # a test file the fork added fails only on the fork
         i=$((i + 1)); out=$STATE_DIR/verify-tests-upstream-$i.json
         rc=0
         bw pnpm exec vitest run "$f" --reporter=json --outputFile.json="$out" >>"$ULOG" 2>&1 || rc=$?
-        if [ $rc -ne 0 ] && [ ! -s "$out" ]; then unor="$unor$f (no report)"$'\n'; fi
-        ujson+=("$out")
+        ids=$(rerun_ids "$f" "$out" "$rc") || fail "unreadable vitest report $out — see $ULOG"
+        up_ids="$up_ids$ids"$'\n'
       done
       git -C "$BUILD_WT" checkout -q --detach "$SHA" || fail "checkout back to $SHORT in $BUILD_WT failed"
       install_deps
-      up_fail=$({ printf '%s' "$unor"; failed_ids ${ujson[@]+"${ujson[@]}"}; } | sort -u) \
-        || fail "unreadable vitest report in the upstream rerun — see $ULOG"
+      up_fail=$(printf '%s' "$up_ids" | sed '/^$/d' | sort -u)
       ours=$(comm -23 <(echo "$fork_fail") <(echo "$up_fail") | sed '/^$/d')
       echo "failing on $BRANCH: $(echo "$fork_fail" | wc -l | tr -d ' '), also on upstream: $(comm -12 <(echo "$fork_fail") <(echo "$up_fail") | sed '/^$/d' | wc -l | tr -d ' ')"
       if [ -n "$ours" ]; then
