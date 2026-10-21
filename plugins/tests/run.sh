@@ -12,6 +12,9 @@ check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 ROLLOUT_NODE=${ROLLOUT_NODE:-$(command -v node)}
 ROLLOUT_PNPM=${ROLLOUT_PNPM:-$HOME/dev/deepseek-harness/apps/desktop/node_modules/pnpm/bin/pnpm.mjs}
 export ROLLOUT_NODE ROLLOUT_PNPM
+# The running-Desktop guard matches this identifier prefix; a distinct one keeps the operator's real
+# DSH Desktop (com.deepseek.harness…) out of the bench.
+export ROLLOUT_BUNDLE_ID=com.deepseek.benchharness
 [ -f "$ROLLOUT_PNPM" ] || { echo "skip: no pnpm entry at $ROLLOUT_PNPM"; exit 0; }
 
 OLD="$SB/old-plugins"; mkdir -p "$OLD/provider-limits"
@@ -121,6 +124,30 @@ H6="$SB/home6"; PR6="$H6/profiles/desktop"; mkdir -p "$PR6"
 cp "$SB/before.json" "$PR6/package.json"; printf '{ "na' > "$PR6/package.json.dz-relink.bak.tmp"
 out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H6" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
 check "a leftover backup temp file is removed and the run proceeds" '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]] && [ -z "$(ls "$PR6" | grep -F .bak)" ]'
+
+# a running DSH Desktop blocks the relink
+mkdesk() {
+  mkdir -p "$1/Contents/MacOS"; ln -s /bin/sleep "$1/Contents/MacOS/DeepSeek Harness"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>%s</string></dict></plist>\n' "$2" > "$1/Contents/Info.plist"
+}
+H7="$SB/home7"; PR7="$H7/profiles/desktop"; mkdir -p "$PR7"
+cp "$SB/before.json" "$PR7/package.json"; cp "$PR7/package.json" "$SB/before7.json"
+run7() { DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H7" ROLLOUT_TEST_HOME="$SB/none" "$@" bash "$P/install.sh" 2>&1; }
+mkdesk "$SB/Run Desk.app" com.deepseek.benchharness.dev.x; mkdesk "$SB/Foreign.app" com.example.other
+"$SB/Run Desk.app/Contents/MacOS/DeepSeek Harness" 120 & dpid=$!
+"$SB/Foreign.app/Contents/MacOS/DeepSeek Harness" 120 & fpid=$!; sleep 0.5
+out=$(run7 env); rc=$?
+check "a running DSH Desktop stops the run with exit 1"  '[ $rc -eq 1 ] && [[ $out == *"plugins/install.sh: a DSH Desktop is running ($SB/Run Desk.app) — quit it first"* ]]'
+check "the refused run leaves package.json untouched"    'cmp -s "$PR7/package.json" "$SB/before7.json" && [ -z "$(ls "$PR7" | grep -F .bak)" ]'
+kill "$dpid"; wait "$dpid" 2>/dev/null
+out=$(run7 env); rc=$?
+check "a running bundle with another identifier does not block" '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]]'
+kill "$fpid"; wait "$fpid" 2>/dev/null
+cp "$SB/before.json" "$PR7/package.json"
+"$SB/Run Desk.app/Contents/MacOS/DeepSeek Harness" 120 & dpid=$!; sleep 0.5
+out=$(run7 env PLUGINS_ALLOW_RUNNING_DESKTOP=1); rc=$?
+check "PLUGINS_ALLOW_RUNNING_DESKTOP=1 disables the check" '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]]'
+kill "$dpid"; wait "$dpid" 2>/dev/null
 
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi

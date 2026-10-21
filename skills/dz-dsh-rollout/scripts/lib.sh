@@ -106,6 +106,39 @@ bundle_pids() {  # $1 = bundle; processes whose executable sits directly in <bun
     pid = $1; exe = substr($0, length($1) + 2)
     if (index(exe, dir) == 1 && index(substr(exe, length(dir) + 1), "/") == 0) print pid }'
 }
+# "<pid> <bundle>" for every process whose executable sits directly in <bundle>.app/Contents/MacOS/
+# and whose bundle's CFBundleIdentifier starts with $BUNDLE_ID (any DSH Desktop, the test instance and
+# dev builds included). Nested helper apps (Contents/Frameworks/…) are not listed.
+desktop_pids() {
+  local cands bundles b id good=""
+  cands=$(proc_paths | awk '{
+    pid = $1; exe = substr($0, length($1) + 2)
+    i = index(exe, "/Contents/MacOS/"); if (i == 0) next
+    bundle = substr(exe, 1, i - 1); rest = substr(exe, i + 16)
+    if (rest == "" || index(rest, "/") > 0) next
+    if (bundle !~ /\.app$/ || index(bundle, "/Contents/") > 0) next
+    print pid " " bundle }')
+  [ -n "$cands" ] || return 0
+  bundles=$(printf '%s\n' "$cands" | cut -d' ' -f2- | sort -u)
+  while IFS= read -r b; do
+    id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$b/Contents/Info.plist" 2>/dev/null || true)
+    if [[ "$id" == "$BUNDLE_ID"* ]]; then good+="$b"$'\n'; fi
+  done <<< "$bundles"
+  [ -n "$good" ] || return 0
+  while IFS= read -r b; do
+    if printf '%s' "$good" | grep -qxF -- "${b#* }"; then printf '%s\n' "$b"; fi
+  done <<< "$cands"
+}
+# Bundles of the DSH Desktops that are neither $APP, $LEGACY_APP nor a test artifact, one per line.
+other_desktop_bundles() {
+  local b
+  desktop_pids | cut -d' ' -f2- | sort -u | while IFS= read -r b; do
+    if [ "$b" = "$APP" ]; then continue; fi
+    if [ -n "$LEGACY_APP" ] && [ "$b" = "$LEGACY_APP" ]; then continue; fi
+    case $b in "$ARTIFACTS"/*) continue ;; esac
+    printf '%s\n' "$b"
+  done
+}
 test_instance_pids() {  # processes running $ARTIFACTS/<sha>/<name>.app/Contents/MacOS/<exe>
   proc_paths | awk -v root="$ARTIFACTS/" '{
     pid = $1; exe = substr($0, length($1) + 2)

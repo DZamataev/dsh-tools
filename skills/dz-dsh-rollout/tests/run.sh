@@ -15,6 +15,15 @@ check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 lib() { bash -c '. "$1"; trap - EXIT; shift; "$@"' _ "$S/lib.sh" "$@"; }
 # A bundle whose executable is a symlink to /bin/sleep (a copied system binary gets SIGKILLed).
 mkbundle() { mkdir -p "$1/Contents/MacOS"; ln -s /bin/sleep "$1/Contents/MacOS/DeepSeek Harness"; }
+# ... with an Info.plist: $1 = bundle, $2 = CFBundleIdentifier.
+mkdesk() {
+  mkbundle "$1"
+  cat > "$1/Contents/Info.plist" <<EOP
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>$2</string></dict></plist>
+EOP
+}
 # A zstd session log: $1 = home, $2 = session id, then the event types in order.
 session() {
   local d="$1/sessions/--proj--/$2" t; mkdir -p "$d"; shift 2
@@ -57,6 +66,9 @@ ROLLOUT_LEGACY_APP=
 ROLLOUT_POST_DEPLOY='echo hook-ran > "\$ROLLOUT_LIVE_HOME/hook.out"'
 EOF
 export ROLLOUT_CONFIG="$SB/cfg/config.sh" ROLLOUT_NO_NOTIFY=1 ROLLOUT_STOP_TIMEOUT=5
+# Desktop detection matches the bundle identifier prefix; a distinct one keeps the operator's real
+# DSH Desktop (com.deepseek.harness…) out of the bench.
+export ROLLOUT_BUNDLE_ID=com.deepseek.benchharness
 # The bench may run inside DSH or Claude Code: deploy.sh would refuse everything but --dry-run.
 unset DSH_SESSION_ID DSH_SHELL CLAUDECODE
 
@@ -83,6 +95,20 @@ check "bundle_pids: finds a bundle's process by executable path" '[ "$(lib bundl
 check "bundle_pids: no match for another bundle"         '[ -z "$(lib bundle_pids "$SB/Other.app")" ]'
 check "bundle_pids: an empty path matches nothing"       '[ -z "$(lib bundle_pids "")" ]'
 kill "$fake"; wait "$fake" 2>/dev/null
+mkdesk "$SB/Desk One.app" com.deepseek.benchharness; mkdesk "$SB/Desk Dev.app" com.deepseek.benchharness.dev.x
+mkdesk "$SB/Desk Foreign.app" com.example.other; mkdesk "$SB/Desk Host.app/Contents/Frameworks/Helper.app" com.deepseek.benchharness.helper
+"$SB/Desk One.app/Contents/MacOS/DeepSeek Harness" 120 & d1=$!
+"$SB/Desk Dev.app/Contents/MacOS/DeepSeek Harness" 120 & d2=$!
+"$SB/Desk Foreign.app/Contents/MacOS/DeepSeek Harness" 120 & d3=$!
+"$SB/Desk Host.app/Contents/Frameworks/Helper.app/Contents/MacOS/DeepSeek Harness" 120 & d4=$!
+mkbundle "$SB/Desk NoPlist.app"; "$SB/Desk NoPlist.app/Contents/MacOS/DeepSeek Harness" 120 & d5=$!
+sleep 0.5
+dp=$(lib desktop_pids)
+check "desktop_pids: a bundle with the DSH identifier, as '<pid> <bundle>'" '[[ $dp == *"$d1 $SB/Desk One.app"* ]]'
+check "desktop_pids: an identifier below the DSH prefix"  '[[ $dp == *"$d2 $SB/Desk Dev.app"* ]]'
+check "desktop_pids: not another identifier, a nested helper or a bundle without Info.plist" \
+  '[[ $dp != *"Desk Foreign"* && $dp != *Helper* && $dp != *NoPlist* ]]'
+kill $d1 $d2 $d3 $d4 $d5; wait $d1 $d2 $d3 $d4 $d5 2>/dev/null
 mkbundle "$TEST/artifacts/abc123/DeepSeek Harness.app"
 "$TEST/artifacts/abc123/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" 120 & tpid=$!; sleep 0.5
 check "test_instance_pids: a process under the artifacts dir" '[ "$(lib test_instance_pids)" = "$tpid" ]'
@@ -164,6 +190,7 @@ out=$("$S/verify.sh" --since 2>&1)
 check "verify --since needs a REF"                      '[[ $out == *"VERIFY FAILED: --since needs a REF"* ]]'
 
 # ── deploy.sh ──
+st() { "$S/state.sh" | grep "^$1=" | cut -d= -f2-; }
 FORKSHA=$(git -C "$SB/fork" rev-parse develop)
 out=$("$S/deploy.sh" --dry-run 2>&1)
 check "deploy dry run warns on an unverified sha"       '[[ $out == *"WARNING: develop"*"is not verified"* ]]'
@@ -206,8 +233,38 @@ check "deploy leaves no .new or .old bundle"            '[ ! -e "$APPDIR/DeepSee
 check "deploy stamps the deployed sha"                  '[ "$(cut -d" " -f1 "$LIVE/logs/rollout/deployed")" = "$FORKSHA" ]'
 check "deploy runs the post-deploy hook"                '[ "$(cat "$LIVE/hook.out" 2>/dev/null)" = hook-ran ]'
 
+# other DSH Desktops on the live home (a fake bundle with the DSH identifier, not $APP, not legacy)
+mkdesk "$SB/Other.app" com.deepseek.benchharness.dev.x
+"$SB/Other.app/Contents/MacOS/DeepSeek Harness" 120 & opid=$!
+mkdesk "$SB/Foreign.app" com.example.other
+"$SB/Foreign.app/Contents/MacOS/DeepSeek Harness" 120 & fpid=$!; sleep 0.5
+mkdir -p "$APPDIR/DeepSeek Harness.app/Contents"; echo keep > "$APPDIR/DeepSeek Harness.app/Contents/marker"
+out=$("$S/deploy.sh" --dry-run 2>&1)
+check "deploy dry run warns about another running DSH Desktop" '[[ $out == *"WARNING: another DSH Desktop runs: $SB/Other.app"* && $out != *Foreign* ]]'
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy refuses while another DSH Desktop still runs, installing nothing" \
+  '[[ $out == *"DEPLOY FAILED: another DSH Desktop still runs: $SB/Other.app (pid $opid) — quit it, then deploy again; nothing installed"* ]] && [ -f "$APPDIR/DeepSeek Harness.app/Contents/marker" ] && kill -0 '"$opid"
+check "state: other_desktops names the other DSH Desktop only" '[ "$(st other_desktops)" = "$SB/Other.app" ]'
+out=$(ROLLOUT_LEGACY_APP="$SB/Other.app" st other_desktops)
+check "state: the legacy app is not an other desktop"    '[ -z "$out" ]'
+kill "$opid"; wait "$opid" 2>/dev/null
+out=$("$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy ignores a running bundle with another identifier" '[[ $out == *"DEPLOY OK: live"* ]] && kill -0 '"$fpid"
+out=$("$S/state.sh")
+check "state: no other desktop prints an empty other_desktops" '[[ $out == *$'"'"'\nother_desktops=\n'"'"'* ]]'
+"$SB/Other.app/Contents/MacOS/DeepSeek Harness" 120 & opid=$!; sleep 0.5
+out=$(ROLLOUT_APP="$SB/NoApp.app" "$S/deploy.sh" --no-relaunch 2>&1)
+check "cutover refuses a running DSH Desktop that ROLLOUT_LEGACY_APP does not name" \
+  '[[ $out == *"DEPLOY FAILED: a DSH Desktop runs ($SB/Other.app) but ROLLOUT_LEGACY_APP does not name it — set it in the config"* ]] && [ ! -e "$SB/NoApp.app" ]'
+out=$(ROLLOUT_APP="$SB/NoApp.app" "$S/deploy.sh" --dry-run 2>&1)
+check "the cutover dry run warns about it" '[[ $out == *"WARNING: a DSH Desktop runs ($SB/Other.app) but ROLLOUT_LEGACY_APP"* ]]'
+out=$(ROLLOUT_APP="$SB/NoApp.app" ROLLOUT_LEGACY_APP="$SB/Other.app" "$S/deploy.sh" --dry-run 2>&1)
+check "the cutover accepts the running desktop when ROLLOUT_LEGACY_APP names it" '[[ $out != *"does not name it"* && $out == *"quit"*"$SB/Other.app"* ]]'
+kill "$opid" "$fpid"; wait "$opid" "$fpid" 2>/dev/null
+out=$(ROLLOUT_APP="$SB/NoApp.app" "$S/deploy.sh" --dry-run 2>&1)
+check "the cutover without a running desktop needs no legacy app" '[[ $out != *"does not name it"* && $out == *"DEPLOY OK: dry run" ]]'
+
 # ── state.sh ──
-st() { "$S/state.sh" | grep "^$1=" | cut -d= -f2-; }
 check "state: rollout once config, develop and the app exist" '[ "$(st mode)" = rollout ]'
 check "state: the verified stamp matches develop"       '[ "$(st verified_is_head)" = yes ]'
 out=$(ROLLOUT_APP="$SB/NoApp.app" st mode)

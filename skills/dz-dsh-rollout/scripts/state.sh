@@ -6,9 +6,12 @@
 #   mode   initial-setup (no config or no integration branch) | cutover (no live bundle yet, or the
 #          legacy dev build still runs) | rollout
 #
+#   other_desktops   bundles of other DSH Desktops running (not the live app, the legacy build or the
+#          test instance), comma-separated; deploy refuses while any runs
+#
 #   state.sh [--help]
 . "$(dirname "$0")/lib.sh"
-case ${1:-} in -h|--help) trap - EXIT; sed -n '2,9p' "$0"; exit 0 ;; esac
+case ${1:-} in -h|--help) trap - EXIT; sed -n '2,12p' "$0"; exit 0 ;; esac
 
 # The agent's own marker first: Claude Code or Codex started in a DSH terminal still inherit DSH_SHELL.
 if [ -n "${DSH_SESSION_ID:-}" ]; then harness=dsh
@@ -77,6 +80,7 @@ echo "live=$live"
 echo "live_pid=$live_pid"
 echo "app_present=$app_present"
 echo "test_instance=$test_instance"
+echo "other_desktops=$(other_desktop_bundles | paste -sd, -)"
 if [ -n "$turns" ]; then printf '%s\n' "$turns" | sed 's/^/open_turn=/'; fi
 if [ $turns_ok = yes ]; then
   open_n=0

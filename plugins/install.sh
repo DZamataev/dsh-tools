@@ -10,6 +10,10 @@
 # again, but only while package.json is exactly the rewrite of the backup. Anything else (edits
 # since, a backup that is not valid JSON) stops with exit 1 and both files untouched.
 #
+# Refuses while a DSH Desktop runs (a process whose executable sits directly in <bundle>.app/Contents/MacOS/
+# of a bundle whose CFBundleIdentifier starts with ROLLOUT_BUNDLE_ID, default com.deepseek.harness):
+# it holds the profiles open. PLUGINS_ALLOW_RUNNING_DESKTOP=1 skips the check (for the bench).
+#
 # Environment: ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME (homes whose profiles/desktop is fixed),
 # ROLLOUT_APP (bundled Node and pnpm; ROLLOUT_NODE / ROLLOUT_PNPM override them),
 # DSH_TOOLS_OLD_PLUGINS (the retired plugin root, default ~/dev/dsh-plugins).
@@ -22,6 +26,24 @@ NODE=${ROLLOUT_NODE:-$RT/node/bin/node}
 PNPM=${ROLLOUT_PNPM:-$RT/pnpm/bin/pnpm.mjs}
 [ -x "$NODE" ] || { echo "plugins/install.sh: no Node at $NODE" >&2; exit 1; }
 [ -f "$PNPM" ] || { echo "plugins/install.sh: no pnpm at $PNPM" >&2; exit 1; }
+
+# First running DSH Desktop bundle, if any.
+running_desktop() {
+  local bundle id
+  while IFS= read -r bundle; do
+    id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Contents/Info.plist" 2>/dev/null || true)
+    if [[ "$id" == "${ROLLOUT_BUNDLE_ID:-com.deepseek.harness}"* ]]; then printf '%s\n' "$bundle"; return 0; fi
+  done < <(ps -axo comm= | sed -E 's/^ +//' | awk '{
+    i = index($0, "/Contents/MacOS/"); if (i == 0) next
+    bundle = substr($0, 1, i - 1); rest = substr($0, i + 16)
+    if (rest == "" || index(rest, "/") > 0) next
+    if (bundle !~ /\.app$/ || index(bundle, "/Contents/") > 0) next
+    print bundle }' | sort -u)
+}
+if [ "${PLUGINS_ALLOW_RUNNING_DESKTOP:-0}" != 1 ]; then
+  desk=$(running_desktop)
+  if [ -n "$desk" ]; then echo "plugins/install.sh: a DSH Desktop is running ($desk) — quit it first" >&2; exit 1; fi
+fi
 
 # Node script, args: SRC DST OLD NEW. Writes SRC's package.json with link plugins moved from OLD to NEW
 # to DST (via rename, only when a link moved; otherwise DST gets SRC's bytes) and prints how many moved.

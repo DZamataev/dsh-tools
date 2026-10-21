@@ -55,6 +55,13 @@ if [ -d "$ART" ] && codesign --verify --deep --strict "$ART" 2>/dev/null; then
 else
   warn_or_fail "no valid artifact for $short at $ART (run verify.sh)"
 fi
+# The first deploy (no $APP yet) must quit the dev build that runs live: it has to be named.
+if [ ! -e "$APP" ] && { [ -z "$LEGACY_APP" ] || [ ! -d "$LEGACY_APP" ] || [[ "$LEGACY_APP" != *.app ]]; }; then
+  running=$(desktop_pids | head -1 | cut -d' ' -f2-)
+  if [ -n "$running" ]; then
+    warn_or_fail "a DSH Desktop runs ($running) but ROLLOUT_LEGACY_APP does not name it — set it in the config"
+  fi
+fi
 old=$(cut -d' ' -f1 "$DEPLOYED" 2>/dev/null || true)
 echo "live $(git -C "$FORK" rev-parse --short "$old" 2>/dev/null || echo none) → $short"
 
@@ -78,6 +85,7 @@ fi
 
 if $dry_run; then
   if $push; then echo "would run: git -C $FORK push $PUSH_REMOTE $BRANCH; after the deploy: git -C $FORK push $PUSH_REMOTE $(wt_branches | cut -f2 | xargs)"; fi
+  while IFS= read -r b; do echo "WARNING: another DSH Desktop runs: $b"; done < <(other_desktop_bundles)
   quits=""
   if [ -n "$(test_instance_pids)" ]; then quits+=" the test instance,"; fi
   if [ -n "$(bundle_pids "$APP")" ]; then quits+=" $APP,"; fi
@@ -97,6 +105,10 @@ step "quit DSH Desktop"
 stop_test_instance
 quit_bundle "$APP"
 quit_bundle "$LEGACY_APP"
+remaining=$(desktop_pids | head -1)
+if [ -n "$remaining" ]; then
+  fail "another DSH Desktop still runs: ${remaining#* } (pid ${remaining%% *}) — quit it, then deploy again; nothing installed"
+fi
 
 step "install $APP"
 install_bundle "$ART" "$APP"
