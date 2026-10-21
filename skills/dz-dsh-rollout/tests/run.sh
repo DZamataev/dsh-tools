@@ -229,6 +229,21 @@ out=$($NOZSTD "$S/state.sh" 2>&1)
 check "state: unreadable turns print open_turns=unknown" '[[ $out == *"open_turns=unknown"* && $out != *"open_turns=1"* ]]'
 check "state: unreadable turns still end with the result line" '[[ $(echo "$out" | tail -1) == "STATE OK: mode="* ]]'
 
+# ── skills/install.sh ──
+I="$HERE/../../install.sh"
+out=$(HOME="$SB/h" bash "$I" --target agents dz-dsh-rollout 2>&1)
+check "install.sh --target agents copies into ~/.agents/skills" '[ -x "$SB/h/.agents/skills/dz-dsh-rollout/scripts/state.sh" ]'
+out=$(HOME="$SB/h" bash "$I" --target claude dz-dsh-rollout 2>&1)
+check "install.sh --target claude copies into ~/.claude/skills" '[ -f "$SB/h/.claude/skills/dz-dsh-rollout/SKILL.md" ]'
+out=$(HOME="$SB/h" CODEX_HOME= bash "$I" --target codex dz-dsh-rollout 2>&1)
+check "install.sh --target codex copies into ~/.codex/skills"   '[ -f "$SB/h/.codex/skills/dz-dsh-rollout/SKILL.md" ]'
+out=$(HOME="$SB/h" bash "$I" --target agents dz-dsh-rollout 2>&1)
+check "install.sh keeps an installed copy without --force"      '[[ $out == *"skip dz-dsh-rollout"* ]]'
+out=$(HOME="$SB/h" bash "$I" --target agents --force dz-dsh-rollout 2>&1)
+check "install.sh --force backs up the old copy"                '[ -n "$(ls "$SB/h/.agents/backups/skills" 2>/dev/null)" ]'
+out=$(HOME="$SB/h" bash "$I" --target nope 2>&1)
+check "install.sh rejects an unknown target"                    '[[ $out == *"--target must be agents, claude or codex"* ]]'
+
 # ── summary ──
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
