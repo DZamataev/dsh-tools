@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Point the DSH Desktop profiles' link plugins at this directory and reinstall the profiles with the
 # app's bundled pnpm. dz-dsh-rollout runs it after each deploy, while every DSH window is closed
-# (Desktop never runs pnpm at startup). Idempotent.
+# (Desktop never runs pnpm at startup). Idempotent. A failed pnpm install restores package.json from
+# a backup, so a retry sees the old links again.
 #
 # Environment: ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME (homes whose profiles/desktop is fixed),
 # ROLLOUT_APP (bundled Node and pnpm; ROLLOUT_NODE / ROLLOUT_PNPM override them),
@@ -19,6 +20,8 @@ PNPM=${ROLLOUT_PNPM:-$RT/pnpm/bin/pnpm.mjs}
 for home in "${ROLLOUT_LIVE_HOME:-$HOME/.dsh}" "${ROLLOUT_TEST_HOME:-$HOME/.dsh-dev}"; do
   profile=$home/profiles/desktop
   [ -f "$profile/package.json" ] || continue
+  backup=$profile/package.json.dz-relink.bak
+  cp "$profile/package.json" "$backup"
   changed=$("$NODE" -e '
     const fs = require("fs")
     const [file, oldRoot, newRoot] = process.argv.slice(1)
@@ -34,8 +37,12 @@ for home in "${ROLLOUT_LIVE_HOME:-$HOME/.dsh}" "${ROLLOUT_TEST_HOME:-$HOME/.dsh-
     }
     if (n > 0) fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
     console.log(n)' "$profile/package.json" "$OLD" "$HERE")
-  if [ "$changed" = 0 ]; then echo "$profile: no link plugin under $OLD"; continue; fi
-  "$NODE" "$PNPM" --dir "$profile" install --no-frozen-lockfile \
-    || { echo "plugins/install.sh: pnpm install failed in $profile" >&2; exit 1; }
+  if [ "$changed" = 0 ]; then rm -f "$backup"; echo "$profile: no link plugin under $OLD"; continue; fi
+  if ! "$NODE" "$PNPM" --dir "$profile" install --no-frozen-lockfile; then
+    mv "$backup" "$profile/package.json"
+    echo "plugins/install.sh: pnpm install failed in $profile; package.json restored" >&2
+    exit 1
+  fi
+  rm -f "$backup"
   echo "$profile: $changed link plugin(s) now under $HERE"
 done

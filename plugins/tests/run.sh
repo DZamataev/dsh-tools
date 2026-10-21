@@ -39,6 +39,30 @@ check "a second run changes nothing"                    '[[ $out == *"no link pl
 out=$(ROLLOUT_LIVE_HOME="$SB/none" ROLLOUT_TEST_HOME="$SB/none2" bash "$P/install.sh" 2>&1); rc=$?
 check "homes without a desktop profile are skipped, exit 0" '[ $rc -eq 0 ]'
 
+# pnpm failure: package.json is restored, the failure is not swallowed on retry
+echo 'process.exit(1)' > "$SB/pnpm-fail.mjs"; echo 'process.exit(0)' > "$SB/pnpm-ok.mjs"
+H2="$SB/home2"; PR2="$H2/profiles/desktop"; mkdir -p "$PR2"
+cat > "$PR2/package.json" <<EOT
+{
+  "name": "dsh-profile-desktop",
+  "private": true,
+  "dependencies": {
+    "@local/a": "link:$OLD/provider-limits",
+    "@local/b": "link:$OLD-other/x",
+    "left-pad": "^1.0.0"
+  }
+}
+EOT
+cp "$PR2/package.json" "$SB/before.json"
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-fail.mjs" ROLLOUT_LIVE_HOME="$H2" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "a failing pnpm makes install.sh exit non-zero"   '[ $rc -ne 0 ]'
+check "a failing pnpm leaves package.json byte-identical" 'cmp -s "$PR2/package.json" "$SB/before.json"'
+check "a failing pnpm leaves no backup file"            '[ -z "$(ls "$PR2" | grep -F .bak)" ]'
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H2" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "the retry after a failure reruns pnpm and succeeds" '[ $rc -eq 0 ] && [[ $out == *"1 link plugin(s) now under $P"* ]]'
+check "only the exact old root is rewritten"            'grep -q "\"@local/a\": \"link:$P/provider-limits\"" "$PR2/package.json" && grep -q "\"@local/b\": \"link:$OLD-other/x\"" "$PR2/package.json" && grep -q "\"left-pad\": \"^1.0.0\"" "$PR2/package.json"'
+check "a successful run leaves no backup file"          '[ -z "$(ls "$PR2" | grep -F .bak)" ]'
+
 echo
 if [ $FAILS -eq 0 ]; then echo "all passed"; else echo "$FAILS failed"; fi
 exit $FAILS
