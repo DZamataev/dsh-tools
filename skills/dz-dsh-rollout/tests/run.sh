@@ -207,6 +207,21 @@ out=$(ROLLOUT_SIGN_IDENTITY= "$S/verify.sh" --no-tests 2>&1)
 check "verify requires a sign identity"                 '[[ $out == *"VERIFY FAILED: ROLLOUT_SIGN_IDENTITY is not set"* ]]'
 out=$("$S/verify.sh" --since 2>&1)
 check "verify --since needs a REF"                      '[[ $out == *"VERIFY FAILED: --since needs a REF"* ]]'
+# (BASH_ENV= keeps a shell startup file from reordering PATH) a fake pnpm stops verify after the stamp handling and records the DSH_HOME it ran with
+mkdir -p "$SB/fakepnpm"; printf '#!/bin/sh\necho "$DSH_HOME" > "%s/pnpm.dshhome"\nexit 1\n' "$SB" > "$SB/fakepnpm/pnpm"; chmod +x "$SB/fakepnpm/pnpm"
+VSHA=$(git -C "$SB/fork" rev-parse develop); mkdir -p "$LIVE/logs/rollout"
+echo "$VSHA old tests=changed app=true artifact=x" > "$LIVE/logs/rollout/verified"
+out=$(BASH_ENV= DSH_HOME=/should/not/leak PATH="$SB/fakepnpm:$PATH" "$S/verify.sh" --no-tests 2>&1)
+check "verify clears the stamp that names its sha"      '[[ $out == *"previous verified stamp for "*" cleared"* ]] && [ ! -e "$LIVE/logs/rollout/verified" ]'
+rm -rf "$(cat "$SB/pnpm.dshhome")"
+echo "0000000000000000000000000000000000000000 old tests=changed app=true artifact=x" > "$LIVE/logs/rollout/verified"
+BASH_ENV= PATH="$SB/fakepnpm:$PATH" "$S/verify.sh" --no-tests >/dev/null 2>&1
+check "verify keeps a stamp that names another sha"     '[ -s "$LIVE/logs/rollout/verified" ]'
+rm -f "$LIVE/logs/rollout/verified"
+vh=$(cat "$SB/pnpm.dshhome")
+check "verify runs builds with a throwaway DSH_HOME (not live, test or the caller's)" \
+  '[ -n "$vh" ] && [ "$vh" != "$LIVE" ] && [ "$vh" != "$TEST" ] && [ "$vh" != /should/not/leak ] && [ -d "$vh" ]'
+rm -rf "$vh"
 
 # ── deploy.sh ──
 st() { "$S/state.sh" | grep "^$1=" | cut -d= -f2-; }
@@ -228,6 +243,12 @@ echo dirty >> "$SB/fork/base.txt"
 out=$("$S/deploy.sh" --dry-run 2>&1)
 check "deploy refuses a dirty fork"                     '[[ $out == *"has uncommitted changes"* ]]'
 git -C "$SB/fork" checkout -q -- base.txt
+out=$(ROLLOUT_SIGN_IDENTITY="Developer ID Application: Bench (ABCDE12345)" "$S/deploy.sh" --no-relaunch 2>&1)
+check "deploy refuses an artifact not signed by the configured identity" '[[ $out == *"DEPLOY FAILED: artifact $TEST/artifacts/$FORKSHA/DeepSeek Harness.app is not signed by Developer ID Application: Bench (ABCDE12345) (run verify.sh)"* ]]'
+out=$(ROLLOUT_SIGN_IDENTITY="Developer ID Application: Bench (ABCDE12345)" "$S/deploy.sh" --dry-run 2>&1)
+check "the dry run warns about it"                      '[[ $out == *"WARNING: artifact"*"is not signed by"* ]]'
+out=$(ROLLOUT_SIGN_IDENTITY= "$S/deploy.sh" --dry-run 2>&1)
+check "deploy needs a sign identity"                    '[[ $out == *"ROLLOUT_SIGN_IDENTITY is not set"* ]]'
 out=$(DSH_SESSION_ID=x "$S/deploy.sh" --push 2>&1)
 check "deploy refuses inside a DSH agent session"       '[[ $out == *"DEPLOY FAILED: deploy is run by the operator"* ]]'
 check "the refusal prints the absolute command"         '[[ $out == *"  $(cd "$S" && pwd)/deploy.sh --push"* ]]'

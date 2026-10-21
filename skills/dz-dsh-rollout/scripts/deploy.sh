@@ -50,8 +50,14 @@ elif $unverified; then
 else
   warn_or_fail "$BRANCH $short is not verified (run verify.sh; last: $(cat "$VERIFIED" 2>/dev/null || echo none))"
 fi
-if [ -d "$ART" ] && codesign --verify --deep --strict "$ART" 2>/dev/null; then
-  echo "artifact: $ART"
+if [ -z "$SIGN_IDENTITY" ]; then
+  warn_or_fail "ROLLOUT_SIGN_IDENTITY is not set"
+elif [ -d "$ART" ] && codesign --verify --deep --strict "$ART" 2>/dev/null; then
+  if requirement_ok "$ART" "$SIGN_IDENTITY"; then
+    echo "artifact: $ART"
+  else
+    warn_or_fail "artifact $ART is not signed by $SIGN_IDENTITY (run verify.sh)"
+  fi
 else
   warn_or_fail "no valid artifact for $short at $ART (run verify.sh)"
 fi

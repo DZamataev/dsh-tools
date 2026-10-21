@@ -51,6 +51,11 @@ else BASE=$UPBASE; fi
 [ -n "$BASE" ] || fail "no test base: nothing deployed and no merge-base with $UPSTREAM (pass --since)"
 git -C "$FORK" cat-file -e "$BASE^{commit}" 2>/dev/null || fail "test base $BASE is not a commit in $FORK"
 echo "$BRANCH $SHORT; tests changed since $(git -C "$FORK" rev-parse --short "$BASE") ($(git -C "$FORK" rev-list --count "$BASE..$SHA") commit(s))"
+# A stamp is evidence for one build; rebuilding this sha invalidates it until this run ends well.
+if [ -f "$VERIFIED" ] && [ "$(cut -d' ' -f1 "$VERIFIED")" = "$SHA" ]; then
+  rm -f "$VERIFIED"
+  echo "previous verified stamp for $SHORT cleared"
+fi
 
 step "build worktree $BUILD_WT at $SHORT"
 if [ ! -e "$BUILD_WT/.git" ]; then
@@ -61,7 +66,9 @@ else
   git -C "$BUILD_WT" checkout -q --detach "$SHA" || fail "checkout of $SHORT in $BUILD_WT failed"
 fi
 # shellcheck disable=SC2046  # one -u NAME pair per word
-bw() { (cd "$BUILD_WT" && env $(dsh_env_unset) "$@"); }
+# Builds and tests get a throwaway DSH_HOME: code that falls back to ~/.dsh must not touch live.
+RUN_HOME=$(mktemp -d)
+bw() { (cd "$BUILD_WT" && env $(dsh_env_unset) DSH_HOME="$RUN_HOME" "$@"); }
 INSTALL_LOG=$STATE_DIR/verify-install.log
 install_deps() {
   bw pnpm install --frozen-lockfile >>"$INSTALL_LOG" 2>&1 || fail "pnpm install failed — see $INSTALL_LOG"
@@ -216,5 +223,6 @@ if $app; then
   echo "test instance up: $ART; DSH_HOME=$TEST_HOME; userData $TEST_HOME/electron-user-data"
 fi
 
+rm -rf "$RUN_HOME"
 echo "$SHA $(date '+%F %T') tests=$tests app=$app artifact=$ART" >"$VERIFIED"
 ok "$BRANCH $SHORT verified (tests=$tests, app=$app). Check the test window, then: deploy.sh [--push]; stop it with verify.sh --stop"
