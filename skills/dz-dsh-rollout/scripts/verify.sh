@@ -65,9 +65,9 @@ else
     || fail "$BUILD_WT has tracked changes — inspect them and reset the worktree by hand"
   git -C "$BUILD_WT" checkout -q --detach "$SHA" || fail "checkout of $SHORT in $BUILD_WT failed"
 fi
-# shellcheck disable=SC2046  # one -u NAME pair per word
 # Builds and tests get a throwaway DSH_HOME: code that falls back to ~/.dsh must not touch live.
 RUN_HOME=$(mktemp -d)
+# shellcheck disable=SC2046  # one -u NAME pair per word
 bw() { (cd "$BUILD_WT" && env $(dsh_env_unset) DSH_HOME="$RUN_HOME" "$@"); }
 INSTALL_LOG=$STATE_DIR/verify-install.log
 install_deps() {
