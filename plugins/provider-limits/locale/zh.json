@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "提供方额度",
+    "description": "在输入框下方的胶囊中显示 TeamClaude、codex-lb 与 OpenCode Go 提供方路由剩余的 5 小时与每周额度，以及上游服务状态。"
+  }
+}

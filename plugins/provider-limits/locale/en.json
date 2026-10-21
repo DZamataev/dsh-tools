@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Provider Limits",
+    "description": "Shows the remaining 5-hour and weekly quota of TeamClaude, codex-lb, and OpenCode Go provider routes, with upstream status, in a pill under the composer."
+  }
+}
