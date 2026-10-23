@@ -3,6 +3,12 @@
 # app's bundled pnpm. dz-dsh-rollout runs it after each deploy, while every DSH window is closed
 # (Desktop never runs pnpm at startup). Idempotent.
 #
+# It also connects every plugin of this directory (a subdirectory whose package.json declares
+# dsh.bundle) that a profile lacks: a `link:` dependency plus its package name in dsh.profile.bundles,
+# after the last @local/ bundle. A profile without a dsh.profile.bundles list gets no new plugin (a
+# warning says so). PLUGINS_ENSURE="a b" limits this to the named subdirectories, PLUGINS_ENSURE=""
+# to none; a plugin left out of the list is neither added nor removed.
+#
 # Before rewriting a profile's package.json the script saves the original as
 # package.json.dz-relink.bak (copied to .bak.tmp first, so a .bak is always complete). A failed pnpm
 # install puts the original back and removes the backup. A run killed (signal, power loss) after the
@@ -16,7 +22,7 @@
 #
 # Environment: ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME (homes whose profiles/desktop is fixed),
 # ROLLOUT_APP (bundled Node and pnpm; ROLLOUT_NODE / ROLLOUT_PNPM override them),
-# DSH_TOOLS_OLD_PLUGINS (the retired plugin root, default ~/dev/dsh-plugins).
+# DSH_TOOLS_OLD_PLUGINS (the retired plugin root, default ~/dev/dsh-plugins), PLUGINS_ENSURE.
 set -euo pipefail
 case ${1:-} in -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;; esac
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -46,29 +52,60 @@ if [ "${PLUGINS_ALLOW_RUNNING_DESKTOP:-0}" != 1 ]; then
   if [ -n "$desk" ]; then echo "plugins/install.sh: a DSH Desktop is running ($desk) — quit it first" >&2; exit 1; fi
 fi
 
-# Node script, args: SRC DST OLD NEW. Writes SRC's package.json with link plugins moved from OLD to NEW
-# to DST (via rename keeping DST's file mode, only when a link moved; otherwise DST gets SRC's bytes) and prints how many moved.
+# Node script, args: SRC DST OLD NEW. Writes SRC's package.json to DST with link plugins moved from
+# OLD to NEW and the missing NEW plugins connected (via rename keeping DST's file mode, only when
+# something changed; otherwise DST gets SRC's bytes). Prints "<moved> <added> [added names…]".
 REWRITE='
   const fs = require("fs")
+  const path = require("path")
   const [src, dst, oldRoot, newRoot] = process.argv.slice(1)
   const pkg = JSON.parse(fs.readFileSync(src, "utf8"))
-  let n = 0
+  let moved = 0
   for (const deps of [pkg.dependencies, pkg.devDependencies, pkg.optionalDependencies]) {
     for (const [name, spec] of Object.entries(deps || {})) {
       if (typeof spec === "string" && spec.startsWith(`link:${oldRoot}/`)) {
         deps[name] = `link:${newRoot}/${spec.slice(`link:${oldRoot}/`.length)}`
-        n++
+        moved++
       }
     }
   }
-  if (n > 0) {
+  const wanted = process.env.PLUGINS_ENSURE === undefined
+    ? fs.readdirSync(newRoot).sort()
+    : process.env.PLUGINS_ENSURE.split(/\s+/).filter(Boolean)
+  const plugins = []
+  for (const dir of wanted) {
+    const manifest = path.join(newRoot, dir, "package.json")
+    if (!fs.existsSync(manifest)) {
+      if (process.env.PLUGINS_ENSURE !== undefined) throw new Error(`PLUGINS_ENSURE names ${dir}, which has no ${manifest}`)
+      continue
+    }
+    const meta = JSON.parse(fs.readFileSync(manifest, "utf8"))
+    if (meta.dsh && meta.dsh.bundle && typeof meta.name === "string") plugins.push({ name: meta.name, spec: `link:${newRoot}/${dir}` })
+  }
+  const bundles = pkg.dsh && pkg.dsh.profile && Array.isArray(pkg.dsh.profile.bundles) ? pkg.dsh.profile.bundles : null
+  const added = []
+  for (const plugin of plugins) {
+    const deps = [pkg.dependencies, pkg.devDependencies, pkg.optionalDependencies]
+    const hasDep = deps.some(d => d && Object.prototype.hasOwnProperty.call(d, plugin.name))
+    if (hasDep && (bundles === null || bundles.includes(plugin.name))) continue
+    if (bundles === null) {
+      console.error(`${src}: no dsh.profile.bundles list; ${plugin.name} not connected`)
+      continue
+    }
+    if (!hasDep) pkg.dependencies = { ...(pkg.dependencies || {}), [plugin.name]: plugin.spec }
+    let at = -1
+    bundles.forEach((bundle, i) => { if (typeof bundle === "string" && bundle.startsWith("@local/")) at = i })
+    bundles.splice(at === -1 ? bundles.length : at + 1, 0, plugin.name)
+    added.push(plugin.name)
+  }
+  if (moved + added.length > 0) {
     fs.writeFileSync(`${dst}.tmp`, JSON.stringify(pkg, null, 2) + "\n")
     if (fs.existsSync(dst)) fs.chmodSync(`${dst}.tmp`, fs.statSync(dst).mode & 0o777)
     fs.renameSync(`${dst}.tmp`, dst)
   } else if (src !== dst) {
     fs.copyFileSync(src, dst)
   }
-  console.log(n)'
+  console.log([moved, added.length, ...added].join(" "))'
 
 for home in "${ROLLOUT_LIVE_HOME:-$HOME/.dsh}" "${ROLLOUT_TEST_HOME:-$HOME/.dsh-dev}"; do
   profile=$home/profiles/desktop
@@ -95,12 +132,14 @@ for home in "${ROLLOUT_LIVE_HOME:-$HOME/.dsh}" "${ROLLOUT_TEST_HOME:-$HOME/.dsh-
     echo "plugins/install.sh: cannot relink $profile/package.json" >&2
     exit 1
   fi
-  if [ "$changed" = 0 ]; then rm -f "$backup"; echo "$profile: no link plugin under $OLD"; continue; fi
+  read -r moved added names <<<"$changed"
+  if [ "$moved" = 0 ] && [ "$added" = 0 ]; then rm -f "$backup"; echo "$profile: no link plugin under $OLD, no plugin to connect"; continue; fi
   if ! "$NODE" "$PNPM" --dir "$profile" install --no-frozen-lockfile; then
     mv "$backup" "$profile/package.json"
     echo "plugins/install.sh: pnpm install failed in $profile; package.json restored" >&2
     exit 1
   fi
   rm -f "$backup"
-  echo "$profile: $changed link plugin(s) now under $HERE"
+  [ "$moved" = 0 ] || echo "$profile: $moved link plugin(s) now under $HERE"
+  [ "$added" = 0 ] || echo "$profile: connected $names"
 done

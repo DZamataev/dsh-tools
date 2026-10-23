@@ -100,7 +100,7 @@ turns) → `--push` develop → stop the test instance → quit the live app and
 ordinary quit → swap the artifact into `ROLLOUT_APP` (`.new`/`.old`, restored on failure) → stamp
 `deployed` → profile setup (`ROLLOUT_PROFILE_SETUP`, default dsh-tools `presets/team-pair/apply.sh`:
 Team mode, Codex mode, Codex teammate mode) → post-deploy hook (`plugins/install.sh`: profile link
-plugins, bundled pnpm) → open the app → `--push` worktree branches. verify.sh runs the same profile
+plugins, missing dsh-tools plugins connected, bundled pnpm) → open the app → `--push` worktree branches. verify.sh runs the same profile
 setup on the test home before it starts the test instance.
 
 ## Pitfalls

@@ -155,6 +155,57 @@ cp "$SB/before.json" "$PR8/package.json"; chmod 600 "$PR8/package.json"
 out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H8" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
 check "a rewritten package.json keeps mode 600" '[ $rc -eq 0 ] && grep -q "link:$P/provider-limits" "$PR8/package.json" && [ "$(stat -f %Lp "$PR8/package.json")" = 600 ]'
 
+# missing dsh-tools plugins are connected: link dependency plus a bundle after the last @local/ one
+H9="$SB/home9"; PR9="$H9/profiles/desktop"; mkdir -p "$PR9"
+cat > "$PR9/package.json" <<EOT
+{
+  "name": "dsh-profile-desktop",
+  "private": true,
+  "dependencies": {
+    "@local/dsh-provider-limits": "link:$P/provider-limits"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@local/dsh-provider-limits",
+        "@deepseek-ai/dsh-experimental-session-search"
+      ]
+    }
+  }
+}
+EOT
+cp "$PR9/package.json" "$SB/before9.json"
+run9() { DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_LIVE_HOME="$H9" ROLLOUT_TEST_HOME="$SB/none" "$@" bash "$P/install.sh" 2>&1; }
+bundles9() { "$ROLLOUT_NODE" -e 'console.log(require(process.argv[1]).dsh.profile.bundles.join(","))' "$PR9/package.json"; }
+out=$(run9 env PLUGINS_ENSURE=""); rc=$?
+check "PLUGINS_ENSURE=\"\" connects nothing"              '[ $rc -eq 0 ] && cmp -s "$PR9/package.json" "$SB/before9.json"'
+out=$(run9 env PLUGINS_ENSURE="nope" ROLLOUT_PNPM="$SB/pnpm-ok.mjs"); rc=$?
+check "PLUGINS_ENSURE naming a missing plugin stops the run, package.json untouched" \
+  '[ $rc -eq 1 ] && [[ $out == *"PLUGINS_ENSURE names nope"* ]] && cmp -s "$PR9/package.json" "$SB/before9.json" && [ -z "$(ls "$PR9" | grep -F .bak)" ]'
+rm -f "$SB/mark"
+out=$(PNPM_MARK="$SB/mark" run9 env ROLLOUT_PNPM="$SB/pnpm-mark.mjs"); rc=$?
+check "a missing plugin is reported as connected and pnpm runs" \
+  '[ $rc -eq 0 ] && [[ $out == *"$PR9: connected @local/dsh-device-reservations"* ]] && [ -f "$SB/mark" ]'
+check "the connected plugin gets a link dependency"     'grep -q "\"@local/dsh-device-reservations\": \"link:$P/device-reservations\"" "$PR9/package.json"'
+check "the bundle goes right after the last @local/ bundle" \
+  '[ "$(bundles9)" = "@deepseek-ai/dsh-base,@local/dsh-provider-limits,@local/dsh-device-reservations,@deepseek-ai/dsh-experimental-session-search" ]'
+cp "$PR9/package.json" "$SB/after9.json"; rm -f "$SB/mark"
+out=$(PNPM_MARK="$SB/mark" run9 env ROLLOUT_PNPM="$SB/pnpm-mark.mjs"); rc=$?
+check "a connected profile is left alone on the next run" \
+  '[ $rc -eq 0 ] && [[ $out == *"no plugin to connect"* ]] && [ ! -f "$SB/mark" ] && cmp -s "$PR9/package.json" "$SB/after9.json"'
+# an interrupted connection is restored and redone
+cp "$SB/before9.json" "$PR9/package.json.dz-relink.bak"; cp "$SB/after9.json" "$PR9/package.json"
+out=$(run9 env ROLLOUT_PNPM="$SB/pnpm-ok.mjs"); rc=$?
+check "an interrupted connection is restored and redone" \
+  '[ $rc -eq 0 ] && [[ $out == *"restored package.json from an unfinished relink"* ]] && cmp -s "$PR9/package.json" "$SB/after9.json" && [ ! -e "$PR9/package.json.dz-relink.bak" ]'
+# a profile without a bundles list gets a warning and no dependency
+H10="$SB/home10"; PR10="$H10/profiles/desktop"; mkdir -p "$PR10"
+printf '{\n  "name": "dsh-profile-desktop",\n  "private": true\n}\n' > "$PR10/package.json"; cp "$PR10/package.json" "$SB/before10.json"
+out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H10" ROLLOUT_TEST_HOME="$SB/none" bash "$P/install.sh" 2>&1); rc=$?
+check "a profile without dsh.profile.bundles is warned about and left untouched" \
+  '[ $rc -eq 0 ] && [[ $out == *"no dsh.profile.bundles list; @local/dsh-device-reservations not connected"* ]] && cmp -s "$PR10/package.json" "$SB/before10.json"'
+
 # --help prints exactly the header comment
 out=$(bash "$P/install.sh" --help 2>&1); rc=$?
 check "install.sh --help: the whole header comment, nothing after it" \
