@@ -1,0 +1,4 @@
+[submodule "mcp/sudo39"]
+	path = mcp/sudo39
+	url = git@github.com:DZamataev/sudo39.git
+	branch = dz/security-hardening
