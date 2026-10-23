@@ -1,0 +1,36 @@
+{
+  "name": "@local/dsh-device-reservations",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "rn-looky test devices (~/.looky ledger) by reserving project, with live runs, connection state, and reserve / hand over / release / stop controls, in the composer dock.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "normalize.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-chat"
+      ]
+    }
+  }
+}

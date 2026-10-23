@@ -1,0 +1,127 @@
+{
+  "ok": true,
+  "command": "device.list",
+  "outcome": "ok",
+  "data": {
+    "worktreeId": "192975ec-d9cf-4031-9144-de987e00797e",
+    "devices": [
+      {
+        "platform": "android",
+        "kind": "device",
+        "name": "TECNO LH7n",
+        "model": "TECNO LH7n",
+        "manufacturer": "TECNO",
+        "serial": "106303738T001067",
+        "adbSerial": "106303738T001067",
+        "release": "14",
+        "avdName": null,
+        "transport": "usb",
+        "overWifi": false,
+        "connected": false,
+        "alias": "текно",
+        "reservation": {
+          "worktreeId": "804f7fca-cd1a-4ee9-8137-fa0ce7b72f87",
+          "actor": "frenzy",
+          "createdAt": "2026-09-30T15:47:42.868Z"
+        },
+        "lease": null,
+        "namedByOperator": true,
+        "lastSeizure": {
+          "actor": "frenzy",
+          "at": "2026-09-30T15:47:42.868Z",
+          "previousWorktreeId": "192975ec-d9cf-4031-9144-de987e00797e",
+          "reason": "confirmed"
+        }
+      },
+      {
+        "platform": "android",
+        "kind": "device",
+        "name": "Samsung SM-S937B",
+        "model": "SM-S937B",
+        "manufacturer": "samsung",
+        "serial": "R5CY62AN45F",
+        "adbSerial": "R5CY62AN45F",
+        "release": "17",
+        "avdName": null,
+        "transport": "usb",
+        "overWifi": false,
+        "connected": true,
+        "alias": "самсунг",
+        "lease": {
+          "worktreeId": "eceeae6a-e882-4a99-bb60-aa1af0e1d66c",
+          "app": "looky",
+          "pid": 37983,
+          "bootId": "boot-1792685426",
+          "startTime": "Fri Oct 23 21:26:08 2026",
+          "acquiredAt": "2026-10-23T18:26:08.764Z",
+          "processGroupId": 38653
+        },
+        "reservation": null,
+        "namedByOperator": true,
+        "lastSeizure": {
+          "actor": "frenzy",
+          "at": "2026-10-23T15:36:41.492Z",
+          "previousWorktreeId": "804f7fca-cd1a-4ee9-8137-fa0ce7b72f87",
+          "reason": "confirmed"
+        }
+      },
+      {
+        "platform": "ios",
+        "kind": "device",
+        "name": "Frenzy_iPhone",
+        "udid": "00008110-00084C8E2E13801E",
+        "coreDeviceId": "3EBA53E3-B1DE-5329-B67A-A68C0553608F",
+        "model": "iPhone 13",
+        "release": "18.7.8",
+        "transport": "usb",
+        "overWifi": false,
+        "paired": true,
+        "reachable": false,
+        "connected": false,
+        "alias": "айфон13",
+        "lease": null,
+        "reservation": null,
+        "lastSeizure": {
+          "actor": "frenzy",
+          "at": "2026-10-22T16:21:18.188Z",
+          "previousWorktreeId": "804f7fca-cd1a-4ee9-8137-fa0ce7b72f87",
+          "reason": "confirmed"
+        },
+        "namedByOperator": true
+      },
+      {
+        "platform": "ios",
+        "kind": "simulator",
+        "name": "iPhone Air",
+        "udid": "4FF42C29-4F78-47F4-ABB5-8FAA2B97DB51",
+        "release": "iOS 26.5",
+        "booted": true,
+        "connected": true,
+        "alias": "iPhone Air",
+        "reservation": {
+          "worktreeId": "eceeae6a-e882-4a99-bb60-aa1af0e1d66c",
+          "actor": "frenzy",
+          "createdAt": "2026-10-23T17:18:56.503Z"
+        },
+        "lease": {
+          "worktreeId": "eceeae6a-e882-4a99-bb60-aa1af0e1d66c",
+          "app": "looky",
+          "pid": 41724,
+          "bootId": "boot-1792685426",
+          "startTime": "Fri Oct 23 21:28:25 2026",
+          "acquiredAt": "2026-10-23T18:28:26.129Z",
+          "processGroupId": 41967
+        },
+        "lastSeizure": {
+          "actor": "frenzy",
+          "at": "2026-10-23T13:45:01.065Z",
+          "previousWorktreeId": "804f7fca-cd1a-4ee9-8137-fa0ce7b72f87",
+          "reason": "confirmed"
+        }
+      }
+    ],
+    "addressable": [],
+    "listing": []
+  },
+  "error": null
+}

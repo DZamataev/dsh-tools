@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Device reservations",
+    "description": "Shows which rn-looky project reserved each test device in the ~/.looky ledger, whether a run holds it, and whether it is connected; reserves, hands over, releases, and stops runs. An icon in the dock under the composer."
+  }
+}
