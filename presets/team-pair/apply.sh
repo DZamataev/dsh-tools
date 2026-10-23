@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install Team mode, Codex mode and Codex teammate mode into a DSH home (default: the test home ~/.dsh-dev).
-#   - adds the Agent Teams bundle and dsh-patch-edit-plus@0.4.3 (plain dependency, never a bundle) to
-#     profiles/desktop/package.json and installs it with the app's bundled pnpm
+#   - adds the Agent Teams bundle and @local/dsh-apply-patch (the dsh-apply-patch submodule next to this
+#     script, as a plain `file:` dependency, never a bundle) to profiles/desktop/package.json, drops the
+#     earlier npm `dsh-patch-edit-plus`, and installs with the app's bundled pnpm
 #   - generates the presets from the DSH sources and the roles file and writes them between
 #     `# >>> team-pair` markers in profiles/desktop/cordis.patch.yml
 #   - installs the team-pair skill into <home>/skills/team-pair
@@ -39,6 +40,9 @@ APP="${ROLLOUT_APP:-$HOME/Applications/DeepSeek Harness.app}"
 RT="$APP/Contents/Resources/runtime/primary-runtime/dependencies"
 NODE="$RT/node/bin/node"
 [ -x "$NODE" ] || { echo "apply.sh: no Node at $NODE (set ROLLOUT_APP)" >&2; exit 2; }
+PATCH_PKG="$HERE/dsh-apply-patch"
+[ -f "$PATCH_PKG/lib/index.js" ] || { echo "apply.sh: $PATCH_PKG is empty; run: git -C $(cd "$HERE/../.." && pwd) submodule update --init" >&2; exit 2; }
+[ ! -e "$PATCH_PKG/node_modules" ] || { echo "apply.sh: $PATCH_PKG has node_modules; develop in a separate clone, the profile must not see dev dependencies" >&2; exit 2; }
 
 # Generate both presets before touching the profile, so a generator failure changes nothing.
 work="$(mktemp -d)"
@@ -47,19 +51,24 @@ python3 "$HERE/make-pair-preset.py" "$BUNDLE_PATCH" "$ROLES" "$work/pair.yml" >/
 python3 "$HERE/make-codex-presets.py" "$STANDARD_PATCH" "$BUNDLE_PATCH" "$work/codex.yml" >/dev/null
 echo "presets: generated from $SRC with roles $ROLES"
 
-"$NODE" - "$PROFILE/package.json" "$BUNDLE" <<'EOF'
+"$NODE" - "$PROFILE/package.json" "$BUNDLE" "$PATCH_PKG" <<'EOF'
 const fs = require('node:fs')
-const [file, bundle] = process.argv.slice(2)
+const [file, bundle, patchPkg] = process.argv.slice(2)
 const pkg = JSON.parse(fs.readFileSync(file, 'utf8'))
 const bundles = (((pkg.dsh ??= {}).profile ??= {}).bundles ??= [])
 if (!bundles.includes(bundle)) bundles.push(bundle)
-// Codex presets: dsh-patch-edit-plus as a plain dependency (exact, audited 0.4.3), never a bundle.
-;(pkg.dependencies ??= {})['dsh-patch-edit-plus'] = '0.4.3'
+const deps = (pkg.dependencies ??= {})
+delete deps['dsh-patch-edit-plus']
+deps['@local/dsh-apply-patch'] = `file:${patchPkg}`
 fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n')
 EOF
-(cd "$PROFILE" && "$NODE" "$RT/pnpm/bin/pnpm.mjs" install --silent)
-[ -f "$PROFILE/node_modules/dsh-patch-edit-plus/package.json" ] || { echo "apply.sh: dsh-patch-edit-plus did not install" >&2; exit 4; }
-echo "profile: Agent Teams bundle and dsh-patch-edit-plus@0.4.3 in $PROFILE/package.json"
+pnpm() { (cd "$PROFILE" && "$NODE" "$RT/pnpm/bin/pnpm.mjs" "$@"); }
+pnpm install --silent
+INSTALLED="$PROFILE/node_modules/@local/dsh-apply-patch"
+# pnpm keeps an earlier copy of a file: directory; reinstall when it differs from the submodule.
+if ! diff -rq "$PATCH_PKG/lib" "$INSTALLED/lib" >/dev/null 2>&1; then pnpm install --silent --force; fi
+diff -rq "$PATCH_PKG/lib" "$INSTALLED/lib" >/dev/null || { echo "apply.sh: $INSTALLED does not match $PATCH_PKG" >&2; exit 4; }
+echo "profile: Agent Teams bundle and @local/dsh-apply-patch ($(git -C "$PATCH_PKG" rev-parse --short HEAD 2>/dev/null || echo local)) in $PROFILE/package.json"
 
 PATCH="$PROFILE/cordis.patch.yml"
 touch "$PATCH"

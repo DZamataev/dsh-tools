@@ -24,9 +24,9 @@ By hand, with the home's DSH closed:
 ALLOW_LIVE=1 ./apply.sh ~/.dsh    # live
 ```
 
-`apply.sh` adds the Agent Teams bundle and `dsh-patch-edit-plus@0.4.3` to `profiles/desktop/package.json` and installs them with the app's bundled pnpm, generates both preset files (`make-pair-preset.py`, `make-codex-presets.py`) and writes them between `# >>> team-pair` markers in `profiles/desktop/cordis.patch.yml`, and installs the `team-pair` skill into `<home>/skills`. It is idempotent; a run that fails before the profile edits changes nothing.
+`apply.sh` adds the Agent Teams bundle and `@local/dsh-apply-patch` (the `dsh-apply-patch` submodule here, as a `file:` dependency) to `profiles/desktop/package.json`, removes the earlier npm `dsh-patch-edit-plus`, installs them with the app's bundled pnpm (reinstalling when the submodule changed), generates both preset files (`make-pair-preset.py`, `make-codex-presets.py`) and writes them between `# >>> team-pair` markers in `profiles/desktop/cordis.patch.yml`, and installs the `team-pair` skill into `<home>/skills`. It is idempotent; a run that fails before the profile edits changes nothing.
 
-`dsh-patch-edit-plus` stays a plain profile dependency: never enable it in Plugins or install it with `dsh plugin install`, which mounts `apply_patch` for every agent.
+`apply_patch` comes from [dsh-apply-patch](https://github.com/DZamataev/dsh-apply-patch), our fork of `dsh-patch-edit-plus` with read-before-write checked up front, undo on failure, working Delete/Move and codex-rs location rules (details in its README). It has no `dsh.bundle`, so it never mounts outside the Codex presets. Clone with `--recurse-submodules` or run `git submodule update --init`; develop it in a separate clone (`~/dev/dsh-apply-patch`, `npm run check`), push, then bump the submodule here. `apply.sh` refuses a submodule with `node_modules`.
 
 ## Roles and models
 

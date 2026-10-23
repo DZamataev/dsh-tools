@@ -2,3 +2,7 @@
 	path = mcp/sudo39
 	url = git@github.com:DZamataev/sudo39.git
 	branch = main
+[submodule "presets/team-pair/dsh-apply-patch"]
+	path = presets/team-pair/dsh-apply-patch
+	url = git@github.com:DZamataev/dsh-apply-patch.git
+	branch = main
