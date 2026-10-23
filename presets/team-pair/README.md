@@ -13,10 +13,11 @@ Needs a DSH build with `agentPreset` on Agent Teams roles (fork branch `feat/age
 ## Use
 
 ```sh
-./deploy-live.sh            # live: checks, quits DSH, applies, deploys the verified build, reopens DSH
-./deploy-live.sh --dry-run  # the same checks, nothing changed
-./apply.sh [home]           # apply to a home (default ~/.dsh-dev); the live home needs ALLOW_LIVE=1 and a closed DSH
+./apply.sh [home]                            # apply to a home (default ~/.dsh-dev)
+ALLOW_LIVE=1 ./apply.sh ~/.dsh               # live; quit DSH first
 ```
+
+Live has the presets since 2026-10-23 (build `0b7312b59d`). They live in the profile and survive deploys, so later builds go out with the ordinary `deploy.sh` of dz-dsh-rollout; rerun `apply.sh` only after changing roles, the Codex prompt, or after an upstream preset change makes it report a stale copy.
 
 `apply.sh` adds the Agent Teams bundle and `dsh-patch-edit-plus@0.4.3` (a plain profile dependency: never enable it in Plugins, that mounts `apply_patch` for every agent) to `profiles/desktop/package.json`, installs with the app's bundled pnpm, writes both preset files between `# >>> team-pair` markers in `profiles/desktop/cordis.patch.yml`, and installs the `team-pair` skill into `<home>/skills`.
 
