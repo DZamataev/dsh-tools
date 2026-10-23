@@ -1,33 +1,38 @@
 # team-pair: Team mode and Codex presets
 
-Agent Presets for the DSH Desktop profile `desktop`, applied on top of the Agent Teams bundle (`@deepseek-ai/dsh-experimental-agent-team-profile`):
+Agent Presets for the DSH Desktop profile `desktop`, on top of the Agent Teams bundle (`@deepseek-ai/dsh-experimental-agent-team-profile`):
 
 | Picker name | id | What it is |
 |---|---|---|
-| Team mode | `team` | Standard mode plus Agent Teams. The Lead (Claude) adds teammates by role from `pair-roles.yml`: `gpt-coder`, `gpt-reviewer` (both in Codex teammate mode) and `claude-reviewer`. |
+| Team mode | `team` | Standard mode plus Agent Teams. The Lead adds teammates by role: by default `gpt-coder`, `gpt-reviewer` (both in Codex teammate mode) and `claude-reviewer`. |
 | Codex mode | `codex` | For GPT models in an ordinary session: Standard mode tools, a Codex prompt, and `apply_patch` in Codex format instead of `edit`/`write`. |
-| Codex teammate mode | `team-codex` | The same on top of Team mode, without subagents; selected by the GPT roles (`agentPreset: team-codex`), not by hand. |
+| Codex teammate mode | `team-codex` | The same on top of Team mode, without subagents; selected by roles with `agentPreset: team-codex`, not by hand. |
 
-Needs a DSH build with `agentPreset` on Agent Teams roles (fork branch `feat/agent-team-models`, from `0a71536e66`; preset role routes stay behind their role from `9af5727498`).
+## Requirements
 
-## Use
+- A DSH fork that contains branch `feat/agent-team-models` (Agent Teams roles with `agentPreset`; a preset role's route stays behind its role). `apply.sh` refuses a checkout without it.
+- dz-dsh-rollout (`skills/dz-dsh-rollout` in this repository) for verify and deploy, or a manual `apply.sh` run.
+
+## Install
+
+With dz-dsh-rollout this is automatic: `ROLLOUT_PROFILE_SETUP` (template default) runs `apply.sh` on the test home in every `verify.sh` and on the live home in every `deploy.sh`, with DSH closed and the presets generated from the fork checkout at the built sha.
+
+By hand, with the home's DSH closed:
 
 ```sh
-./apply.sh [home]                            # apply to a home (default ~/.dsh-dev)
-ALLOW_LIVE=1 ./apply.sh ~/.dsh               # live; quit DSH first
+./apply.sh [home]                 # default ~/.dsh-dev
+ALLOW_LIVE=1 ./apply.sh ~/.dsh    # live
 ```
 
-Live has the presets since 2026-10-23 (build `0b7312b59d`). They live in the profile and survive deploys, so later builds go out with the ordinary `deploy.sh` of dz-dsh-rollout; rerun `apply.sh` only after changing roles, the Codex prompt, or after an upstream preset change makes it report a stale copy.
+`apply.sh` adds the Agent Teams bundle and `dsh-patch-edit-plus@0.4.3` to `profiles/desktop/package.json` and installs them with the app's bundled pnpm, generates both preset files (`make-pair-preset.py`, `make-codex-presets.py`) and writes them between `# >>> team-pair` markers in `profiles/desktop/cordis.patch.yml`, and installs the `team-pair` skill into `<home>/skills`. It is idempotent; a run that fails before the profile edits changes nothing.
 
-`apply.sh` adds the Agent Teams bundle and `dsh-patch-edit-plus@0.4.3` (a plain profile dependency: never enable it in Plugins, that mounts `apply_patch` for every agent) to `profiles/desktop/package.json`, installs with the app's bundled pnpm, writes both preset files between `# >>> team-pair` markers in `profiles/desktop/cordis.patch.yml`, and installs the `team-pair` skill into `<home>/skills`.
+`dsh-patch-edit-plus` stays a plain profile dependency: never enable it in Plugins or install it with `dsh plugin install`, which mounts `apply_patch` for every agent.
 
-## Change
+## Roles and models
 
-- Roles and models: edit `pair-roles.yml`, then `python3 make-pair-preset.py <SRC>/packages/experimental/agent-team-profile/cordis.patch.yml pair-roles.yml pair-preset.cordis.patch.yml`.
-- Codex prompt or rows: edit `make-codex-presets.py`, then run it with `<SRC>/packages/bundle/web-app/presets/standard.patch.yml` and the bundle patch.
-- `apply.sh` regenerates both files from the DSH sources in `SRC` (default `~/dev/deepseek-harness`) and refuses a stale copy, printing the command that refreshes it.
+Roles live in `~/.config/dz-dsh-rollout/team-roles.yml` when that file exists, else in `pair-roles.yml` here (the author's TeamClaude `anthropic` and `codex-lb` routes). For your own setup, copy `pair-roles.yml` there and set each role's `provider` (a key under `llm-pi-ai` `providers` in your profile), `model`, and optional `reasoningEffort`, `instructions` and `agentPreset`. Keep GPT routes out of `models`, so a GPT teammate can only be created by a role and therefore in Codex teammate mode. The next verify or deploy applies the change; `TEAM_PAIR_ROLES` points `apply.sh` at another file.
 
-GPT routes are not listed under `models`, so a GPT teammate can only be created by role, and therefore in Codex teammate mode.
+The Codex prompt and the rows of both Codex presets are in `make-codex-presets.py`.
 
 ## Do not install
 

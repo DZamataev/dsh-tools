@@ -24,6 +24,7 @@ APP=${ROLLOUT_APP:-$HOME/Applications/DeepSeek Harness.app}
 SIGN_IDENTITY=${ROLLOUT_SIGN_IDENTITY:-}
 LEGACY_APP=${ROLLOUT_LEGACY_APP:-}                        # pre-cutover dev build that deploy also quits
 POST_DEPLOY=${ROLLOUT_POST_DEPLOY:-}
+PROFILE_SETUP=${ROLLOUT_PROFILE_SETUP:-}                  # run on a closed home: test (verify), live (deploy)
 KEEP_ARTIFACTS=${ROLLOUT_KEEP_ARTIFACTS:-3}
 TURN_WINDOW_HOURS=${ROLLOUT_TURN_WINDOW_HOURS:-12}        # an older open turn is a crash leftover
 BUNDLE_ID=${ROLLOUT_BUNDLE_ID:-com.deepseek.harness}
@@ -199,6 +200,14 @@ stop_test_instance() {
 }
 # The ordinary quit (as ⌘Q): DSH asks for confirmation itself while tasks run. Addressed by path;
 # stop the test instance first, it shares the bundle id.
+# Run $PROFILE_SETUP on one DSH home whose Desktop is closed. The command gets the home as its first
+# argument and ROLLOUT_SRC (DSH checkout at the built sha), ROLLOUT_APP and ALLOW_LIVE=1 in its
+# environment. Returns the command's status; no command configured returns 0.
+run_profile_setup() {  # $1 = DSH home, $2 = DSH checkout at the built sha
+  [ -n "$PROFILE_SETUP" ] || return 0
+  ROLLOUT_SRC=$2 ROLLOUT_APP=$APP ALLOW_LIVE=1 bash -c "$PROFILE_SETUP \"\$1\"" profile-setup "$1"
+}
+
 quit_bundle() {  # $1 = bundle
   local err rc=0
   [ -n "${1:-}" ] || return 0

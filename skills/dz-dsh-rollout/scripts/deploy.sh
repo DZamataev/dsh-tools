@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Step 3/3. Install the verified artifact as the live Desktop: stop the test instance, quit the live
 # app (its own quit confirmation guards running tasks), swap the bundle into $ROLLOUT_APP, stamp,
-# run the post-deploy hook, reopen.
+# run $ROLLOUT_PROFILE_SETUP on the live home, run the post-deploy hook, reopen.
 #
 #   deploy.sh --dry-run     plan only (works inside DSH too)
 #   deploy.sh               deploy (refuses unless verify.sh recorded the current branch sha)
@@ -97,7 +97,7 @@ if $dry_run; then
   if [ -n "$(test_instance_pids)" ]; then quits+=" the test instance,"; fi
   if [ -n "$(bundle_pids "$APP")" ]; then quits+=" $APP,"; fi
   if [ -n "$(bundle_pids "$LEGACY_APP")" ]; then quits+=" $LEGACY_APP,"; fi
-  echo "would: quit${quits:- nothing,} install $ART into $APP, stamp $short$([ -n "$POST_DEPLOY" ] && echo ", run $POST_DEPLOY")$($relaunch && echo ", open $APP")"
+  echo "would: quit${quits:- nothing,} install $ART into $APP, stamp $short$([ -n "$PROFILE_SETUP" ] && echo ", set up $LIVE_HOME with $PROFILE_SETUP")$([ -n "$POST_DEPLOY" ] && echo ", run $POST_DEPLOY")$($relaunch && echo ", open $APP")"
   if inside_dsh; then echo "the operator runs, from a terminal outside DSH: $cmd"; fi
   ok "dry run"
   exit 0
@@ -121,6 +121,12 @@ step "install $APP"
 install_bundle "$ART" "$APP"
 echo "$new $(date '+%F %T')" >"$DEPLOYED"
 echo "$APP is the build of $short"
+
+if [ -n "$PROFILE_SETUP" ]; then
+  step "profile setup $LIVE_HOME"
+  run_profile_setup "$LIVE_HOME" "$FORK" \
+    || fail "profile setup failed: $PROFILE_SETUP $LIVE_HOME ($APP is installed, the app stays closed)"
+fi
 
 if [ -n "$POST_DEPLOY" ]; then
   step "post-deploy hook"

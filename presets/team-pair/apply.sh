@@ -2,12 +2,21 @@
 # Install Team mode, Codex mode and Codex teammate mode into a DSH home (default: the test home ~/.dsh-dev).
 #   - adds the Agent Teams bundle and dsh-patch-edit-plus@0.4.3 (plain dependency, never a bundle) to
 #     profiles/desktop/package.json and installs it with the app's bundled pnpm
-#   - writes pair-preset.cordis.patch.yml (the bundle's `team` preset as "Team mode" with the roles of
-#     pair-roles.yml) and codex-presets.cordis.patch.yml between markers in profiles/desktop/cordis.patch.yml
+#   - generates the presets from the DSH sources and the roles file and writes them between
+#     `# >>> team-pair` markers in profiles/desktop/cordis.patch.yml
 #   - installs the team-pair skill into <home>/skills/team-pair
-# Both preset files are generated (make-pair-preset.py, make-codex-presets.py) from the DSH sources in
-# SRC (default: the fork checkout ~/dev/deepseek-harness); a copy that no longer matches its sources is
-# refused. Idempotent. Quit the DSH Desktop that uses the home first; the live home needs ALLOW_LIVE=1.
+#
+# dz-dsh-rollout runs it as ROLLOUT_PROFILE_SETUP: verify.sh on the test home, deploy.sh on the live
+# home, each time with that home's Desktop closed and ROLLOUT_SRC at the built sha.
+#
+# Environment:
+#   ROLLOUT_SRC / SRC    DSH checkout whose shipped presets are the base (default ~/dev/deepseek-harness);
+#                        it must contain Agent Teams roles with agentPreset (fork branch feat/agent-team-models)
+#   TEAM_PAIR_ROLES      roles and models (default ~/.config/dz-dsh-rollout/team-roles.yml when it
+#                        exists, else pair-roles.yml next to this script)
+#   ROLLOUT_APP          DSH app whose bundled Node and pnpm are used (default ~/Applications/DeepSeek Harness.app)
+#   ALLOW_LIVE=1         required for the live home ~/.dsh; quit DSH first
+# Idempotent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOME_DIR="${1:-$HOME/.dsh-dev}"
@@ -16,63 +25,49 @@ PROFILE="$HOME_DIR/profiles/desktop"
 [ -f "$PROFILE/package.json" ] || { echo "apply.sh: no $PROFILE/package.json" >&2; exit 2; }
 BUNDLE='@deepseek-ai/dsh-experimental-agent-team-profile'
 
-# Drift check: both preset files are copies of shipped presets. Regenerate them into temp files and
-# refuse a stale copy; the message names the command that refreshes it.
-SRC="${SRC:-$HOME/dev/deepseek-harness}"
+SRC="${ROLLOUT_SRC:-${SRC:-$HOME/dev/deepseek-harness}}"
 BUNDLE_PATCH="$SRC/packages/experimental/agent-team-profile/cordis.patch.yml"
 STANDARD_PATCH="$SRC/packages/bundle/web-app/presets/standard.patch.yml"
 for f in "$BUNDLE_PATCH" "$STANDARD_PATCH"; do
-  [ -f "$f" ] || { echo "apply.sh: no $f (set SRC to a DSH checkout)" >&2; exit 2; }
+  [ -f "$f" ] || { echo "apply.sh: no $f (set ROLLOUT_SRC to a DSH checkout)" >&2; exit 2; }
 done
-check_fresh() {  # $1 = committed copy, rest = generator and its inputs
-  local copy=$1 fresh; shift
-  fresh="$(mktemp)"
-  python3 "$@" "$fresh" >/dev/null
-  if ! cmp -s "$fresh" "$copy"; then
-    rm -f "$fresh"
-    echo "apply.sh: $(basename "$copy") is stale against $SRC; run: python3 $* $copy" >&2
-    exit 3
-  fi
-  rm -f "$fresh"
-}
-check_fresh "$HERE/pair-preset.cordis.patch.yml" "$HERE/make-pair-preset.py" "$BUNDLE_PATCH" "$HERE/pair-roles.yml"
-check_fresh "$HERE/codex-presets.cordis.patch.yml" "$HERE/make-codex-presets.py" "$STANDARD_PATCH" "$BUNDLE_PATCH"
+grep -q 'agentPreset' "$SRC/packages/experimental/tool-agent-team/src/routes.ts" 2>/dev/null \
+  || { echo "apply.sh: $SRC has no agentPreset on Agent Teams roles (needs fork branch feat/agent-team-models)" >&2; exit 2; }
+ROLES="${TEAM_PAIR_ROLES:-${XDG_CONFIG_HOME:-$HOME/.config}/dz-dsh-rollout/team-roles.yml}"
+[ -f "$ROLES" ] || ROLES="$HERE/pair-roles.yml"
+APP="${ROLLOUT_APP:-$HOME/Applications/DeepSeek Harness.app}"
+RT="$APP/Contents/Resources/runtime/primary-runtime/dependencies"
+NODE="$RT/node/bin/node"
+[ -x "$NODE" ] || { echo "apply.sh: no Node at $NODE (set ROLLOUT_APP)" >&2; exit 2; }
 
+# Generate both presets before touching the profile, so a generator failure changes nothing.
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+python3 "$HERE/make-pair-preset.py" "$BUNDLE_PATCH" "$ROLES" "$work/pair.yml" >/dev/null
+python3 "$HERE/make-codex-presets.py" "$STANDARD_PATCH" "$BUNDLE_PATCH" "$work/codex.yml" >/dev/null
+echo "presets: generated from $SRC with roles $ROLES"
 
-node - "$PROFILE/package.json" "$BUNDLE" <<'EOF'
+"$NODE" - "$PROFILE/package.json" "$BUNDLE" <<'EOF'
 const fs = require('node:fs')
 const [file, bundle] = process.argv.slice(2)
 const pkg = JSON.parse(fs.readFileSync(file, 'utf8'))
-const profile = ((pkg.dsh ??= {}).profile ??= {})
-const bundles = (profile.bundles ??= [])
+const bundles = (((pkg.dsh ??= {}).profile ??= {}).bundles ??= [])
 if (!bundles.includes(bundle)) bundles.push(bundle)
+// Codex presets: dsh-patch-edit-plus as a plain dependency (exact, audited 0.4.3), never a bundle.
+;(pkg.dependencies ??= {})['dsh-patch-edit-plus'] = '0.4.3'
 fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n')
-console.log('bundles:', bundles.join(', '))
 EOF
-
-# Codex teammates: dsh-patch-edit-plus as a plain dependency (exact, audited 0.4.3), never a bundle.
-node - "$PROFILE/package.json" <<'EOF2'
-const fs = require('node:fs')
-const [file] = process.argv.slice(2)
-const pkg = JSON.parse(fs.readFileSync(file, 'utf8'))
-const deps = (pkg.dependencies ??= {})
-deps['dsh-patch-edit-plus'] = '0.4.3'
-fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n')
-console.log('dependency: dsh-patch-edit-plus@0.4.3')
-EOF2
-RT="${ROLLOUT_APP:-$HOME/Applications/DeepSeek Harness.app}/Contents/Resources/runtime/primary-runtime/dependencies"
-(cd "$PROFILE" && "$RT/node/bin/node" "$RT/pnpm/bin/pnpm.mjs" install --silent)
+(cd "$PROFILE" && "$NODE" "$RT/pnpm/bin/pnpm.mjs" install --silent)
 [ -f "$PROFILE/node_modules/dsh-patch-edit-plus/package.json" ] || { echo "apply.sh: dsh-patch-edit-plus did not install" >&2; exit 4; }
+echo "profile: Agent Teams bundle and dsh-patch-edit-plus@0.4.3 in $PROFILE/package.json"
 
 PATCH="$PROFILE/cordis.patch.yml"
 touch "$PATCH"
-BEGIN='# >>> team-pair (managed by ~/dev/dsh-tools/presets/team-pair/apply.sh)'
+BEGIN='# >>> team-pair (managed by dsh-tools presets/team-pair/apply.sh; generated, do not edit)'
 END='# <<< team-pair'
-tmp="$(mktemp)"
-# Any earlier `# >>> team-pair` marker counts, so a block written from the old location is replaced too.
-awk -v e="$END" 'index($0, "# >>> team-pair") == 1 {skip=1; next} $0==e {skip=0; next} !skip' "$PATCH" > "$tmp"
-{ cat "$tmp"; echo "$BEGIN"; cat "$HERE/pair-preset.cordis.patch.yml"; cat "$HERE/codex-presets.cordis.patch.yml"; echo "$END"; } > "$PATCH"
-rm -f "$tmp"
+# Any `# >>> team-pair` marker counts, so a block written by an older version is replaced too.
+awk -v e="$END" 'index($0, "# >>> team-pair") == 1 {skip=1; next} $0==e {skip=0; next} !skip' "$PATCH" > "$work/rest.yml"
+{ cat "$work/rest.yml"; echo "$BEGIN"; cat "$work/pair.yml" "$work/codex.yml"; echo "$END"; } > "$PATCH"
 echo "patch: $PATCH (team-pair block refreshed)"
 
 mkdir -p "$HOME_DIR/skills"

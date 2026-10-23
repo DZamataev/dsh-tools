@@ -8,8 +8,9 @@
 #      once more on the branch: only failures that persist and upstream lacks count as ours;
 #   3. package the unsigned macOS app, build:check, re-sign it with $ROLLOUT_SIGN_IDENTITY (TCC
 #      grants survive rebuilds) and store it as $ROLLOUT_TEST_HOME/artifacts/<sha>/;
-#   4. seed $ROLLOUT_TEST_HOME from the live home (no credentials, sessions or mobile access) and
-#      start the artifact as the test instance (own DSH_HOME and Electron userData).
+#   4. seed $ROLLOUT_TEST_HOME from the live home (no credentials, sessions or mobile access), run
+#      $ROLLOUT_PROFILE_SETUP on it, and start the artifact as the test instance (own DSH_HOME and
+#      Electron userData).
 #
 #   verify.sh               all of the above
 #   verify.sh --full        the whole vitest suite instead of --changed
@@ -211,6 +212,14 @@ if $app; then
     echo "seeded .env, cordis.patch.yml, storages/workspace.json, profiles/desktop (patch, manifest, lockfile, node_modules); no credentials, sessions or mobile access"
   else
     echo "kept the existing seed (--reseed to refresh)"
+  fi
+
+  if [ -n "$PROFILE_SETUP" ]; then
+    step "profile setup $TEST_HOME"
+    stop_test_instance   # the setup edits the profile it reads
+    run_profile_setup "$TEST_HOME" "$BUILD_WT" >"$STATE_DIR/verify-profile-setup.log" 2>&1 \
+      || fail "profile setup failed: $PROFILE_SETUP $TEST_HOME — see $STATE_DIR/verify-profile-setup.log"
+    tail -n 3 "$STATE_DIR/verify-profile-setup.log"
   fi
 
   step "start test instance"

@@ -21,7 +21,12 @@ their machine waits for their explicit yes; ask one at a time.
    - the sign identity (`security find-identity -v -p codesigning`; prefer `Developer ID
      Application`);
    - `ROLLOUT_LEGACY_APP` = the dev build live runs now, when it is not yet in `ROLLOUT_APP`
-     (`ps -axo pid,comm | grep -i harness`).
+     (`ps -axo pid,comm | grep -i harness`);
+   - `ROLLOUT_PROFILE_SETUP`: the default installs the Agent Teams presets (Team mode, Codex mode,
+     Codex teammate mode) on every verify and deploy. It needs a fork that contains branch
+     `feat/agent-team-models`; put the operator's roles and LLM routes in
+     `~/.config/dz-dsh-rollout/team-roles.yml` (copy `presets/team-pair/pair-roles.yml`; provider ids
+     are the keys under `llm-pi-ai` `providers` in the profile). Empty it to skip the presets.
 
 ## Integration branch
 

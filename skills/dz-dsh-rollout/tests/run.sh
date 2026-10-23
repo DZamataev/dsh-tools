@@ -64,7 +64,12 @@ ROLLOUT_APP="$APPDIR/DeepSeek Harness.app"
 ROLLOUT_SIGN_IDENTITY=-
 ROLLOUT_LEGACY_APP=
 ROLLOUT_POST_DEPLOY='echo hook-ran > "\$ROLLOUT_LIVE_HOME/hook.out"'
+ROLLOUT_PROFILE_SETUP=$SB/profile-setup.sh
 EOF
+# Records its home, source checkout and ALLOW_LIVE. It also deletes the post-deploy hook's output, so
+# "deploy runs the post-deploy hook" passes only when the hook runs after the setup.
+printf '#!/bin/sh\necho "$1 $ROLLOUT_SRC $ALLOW_LIVE" >> "%s/setup.calls"\nrm -f "$1/hook.out"\n' "$SB" > "$SB/profile-setup.sh"
+chmod +x "$SB/profile-setup.sh"
 export ROLLOUT_CONFIG="$SB/cfg/config.sh" ROLLOUT_NO_NOTIFY=1 ROLLOUT_STOP_TIMEOUT=5
 # Desktop detection matches the bundle identifier prefix; a distinct one keeps the operator's real
 # DSH Desktop (com.deepseek.harness…) out of the bench.
@@ -290,6 +295,10 @@ check "deploy installs the artifact into the app path"  '[[ $out == *"DEPLOY OK:
 check "deploy leaves no .new or .old bundle"            '[ ! -e "$APPDIR/DeepSeek Harness.app.new" ] && [ ! -e "$APPDIR/DeepSeek Harness.app.old" ]'
 check "deploy stamps the deployed sha"                  '[ "$(cut -d" " -f1 "$LIVE/logs/rollout/deployed")" = "$FORKSHA" ]'
 check "deploy runs the post-deploy hook"                '[ "$(cat "$LIVE/hook.out" 2>/dev/null)" = hook-ran ]'
+check "deploy sets up the live profile before the hook"  '[ "$(tail -n 1 "$SB/setup.calls" 2>/dev/null)" = "$LIVE $SB/fork 1" ]'
+rm -f "$LIVE/hook.out"
+out=$(ROLLOUT_PROFILE_SETUP=false "$S/deploy.sh" --no-relaunch 2>&1)
+check "a failed profile setup stops deploy before the hook" '[[ $out == *"DEPLOY FAILED: profile setup failed"* ]] && [ ! -e "$LIVE/hook.out" ]'
 printf '#!/bin/sh\necho "$*" > "%s/open.args"\n(env | grep -E "^(DSH|ELECTRON)_" || echo none) > "%s/open.env"\n' "$SB" "$SB" > "$FAKEBIN/open"; chmod +x "$FAKEBIN/open"
 out=$(BASH_ENV= PATH="$FAKEBIN:$PATH" ELECTRON_RUN_AS_NODE=1 DSH_HOME=/should/not/leak "$S/deploy.sh" 2>&1)
 check "deploy relaunches the app" '[[ $out == *"DEPLOY OK: live"* && "$(cat "$SB/open.args" 2>/dev/null)" == "$APPDIR/DeepSeek Harness.app" ]]'

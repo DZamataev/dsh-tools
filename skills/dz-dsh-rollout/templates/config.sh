@@ -28,6 +28,13 @@ ROLLOUT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 # Dev build live still runs before the first deploy (cutover); deploy quits it too. Empty afterwards.
 ROLLOUT_LEGACY_APP=
 
+# Command run with a DSH home as its argument while that home's Desktop is closed: by verify.sh on
+# the test home before it starts the test instance, and by deploy.sh on the live home after the bundle
+# is installed, before ROLLOUT_POST_DEPLOY. Gets ROLLOUT_SRC (DSH checkout at the built sha),
+# ROLLOUT_APP and ALLOW_LIVE=1. The default installs Team mode, Codex mode and Codex teammate mode
+# (dsh-tools presets/team-pair; roles in ~/.config/dz-dsh-rollout/team-roles.yml). Empty: none.
+ROLLOUT_PROFILE_SETUP="$HOME/dev/dsh-tools/presets/team-pair/apply.sh"
+
 # Command run after the bundle is installed, while every window is closed.
 # Gets ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME and ROLLOUT_APP in its environment.
 ROLLOUT_POST_DEPLOY="$HOME/dev/dsh-tools/plugins/install.sh"
