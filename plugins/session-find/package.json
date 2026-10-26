@@ -1,0 +1,23 @@
+{
+  "name": "@local/dsh-session-find",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cmd/Ctrl+F search of the open session's conversation, read from the session log on the Host; results in a floating panel.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "search.js", "run.js", "match-worker.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "scripts": { "test": "node --test tests/" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

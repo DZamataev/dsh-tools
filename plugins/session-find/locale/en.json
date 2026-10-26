@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Find in Conversation",
+    "description": "Cmd/Ctrl+F or the header button searches your messages and the assistant's replies in the open session's whole log, with an optional regular expression. Matches are listed in a separate panel; nothing is indexed."
+  }
+}
