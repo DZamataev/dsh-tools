@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { advanceIndex, boundMessages, compileQuery, contextWindow, conversationDocuments, findMatches, foldText, literalMatcher, matchedStrings, occurrences, queryTerms } from '../search.js'
+import { advanceIndex, boundMessages, compileQuery, contextWindow, conversationDocuments, findMatches, foldText, literalMatcher, matchedStrings, occurrences, queryTerms, targetOrdinal } from '../search.js'
 import { parseRequest } from '../index.js'
 import { runSearch, SearchStopped } from '../run.js'
 
@@ -161,7 +161,45 @@ test('target strings come first, so the string cap cannot drop the target highli
   const messages = [{ seq: 1, text: 'alpha' }, { seq: 2, text: 'beta' }]
   const found = matchedStrings(messages, compileQuery('alpha|beta', true), 2, { maxStrings: 1, maxChars: 100 })
   assert.deepEqual(found.strings, ['beta'])
-  assert.equal(found.targetOrdinal, 0)
+  assert.equal(found.targetFirst, 0)
+})
+
+test('the surroundings of the first target match come from the real match, not a look-alike', () => {
+  const found = matchedStrings([{ seq: 1, text: 'bar Ёfoobar tail' }], compileQuery('(?<=foo)bar', true), 1, { maxStrings: 10, maxChars: 100 })
+  assert.deepEqual(found.strings, ['bar'])
+  assert.equal(found.targetFirst, 8)
+  assert.equal(found.targetBefore, 'bar Еfoo')
+  assert.equal(found.targetAfter, ' tail')
+})
+
+test('the target ordinal is counted in the shown text', () => {
+  assert.equal(targetOrdinal('bar foobar', ['bar'], 7), 1)
+  assert.equal(targetOrdinal('bar foobar', ['bar'], 99), null)
+  assert.equal(targetOrdinal('bar', [], 0), null)
+})
+
+test('the browser picks the real match among look-alike highlights in rendered text', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  const helpers = src.slice(src.indexOf('    const SPECIAL'), src.indexOf('    function readJson'))
+  const anchor = src.slice(src.indexOf('    const comparable'), src.indexOf('    function ContextView'))
+  const { pickAnchor, literalMatcher: matcherOf } = new Function('const ANCHOR_SPAN = 300\n' + helpers + anchor + '; return { pickAnchor, literalMatcher }')()
+  const candidatesIn = (text, strings) => [...occurrences(foldText(text), matcherOf(strings))].map(([at, end]) => ({ at, end }))
+  // Raw Markdown: the link target holds a look-alike the renderer drops.
+  const raw = '[bar](https://bar.example) foobar'
+  const found = matchedStrings([{ seq: 1, text: raw }], compileQuery('(?<=foo)bar', true), 1, { maxStrings: 10, maxChars: 100 })
+  const ordinal = targetOrdinal(raw, found.strings, found.targetFirst)
+  const rendered = 'bar foobar'
+  const picked = pickAnchor(candidatesIn(rendered, found.strings), rendered, found.targetBefore, found.targetAfter, ordinal)
+  assert.equal(picked.at, 7)
+  // A long plain message, cropped around the match.
+  const long = 'bar '.repeat(500) + 'foobar bar bar'
+  const plan = compileQuery('(?<=foo)bar', true)
+  const hit = matchedStrings([{ seq: 1, text: long }], plan, 1, { maxStrings: 10, maxChars: 100 })
+  const [shown] = boundMessages([{ seq: 1, text: long }], 1, hit.targetFirst, 1_000)
+  const shownOrdinal = targetOrdinal(shown.text, hit.strings, hit.targetFirst - shown.offset)
+  const choice = pickAnchor(candidatesIn(shown.text, hit.strings), shown.text, hit.targetBefore, hit.targetAfter, shownOrdinal)
+  assert.equal(choice.at, hit.targetFirst - shown.offset)
 })
 
 test('search results carry the offset of their first match', () => {

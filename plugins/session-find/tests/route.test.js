@@ -158,6 +158,17 @@ test('the target ordinal points at the real match among literal highlights', asy
   const { body } = await m.call(CONTEXT_PATH, ctxBody(1, '(?<=foo)bar', true))
   assert.deepEqual(body.highlights, ['bar'])
   assert.equal(body.targetOrdinal, 1)
+  assert.equal(body.targetBefore, 'bar foo')
+})
+
+test('in a cropped target the ordinal counts only the shown occurrences', async () => {
+  const text = 'bar '.repeat(500) + 'foobar bar bar'
+  const m = mount({ maxMessageChars: 1_000 }, { events: [turn(0, 1), user(1, text)] })
+  const { body } = await m.call(CONTEXT_PATH, ctxBody(1, '(?<=foo)bar', true))
+  const [shown] = body.messages
+  const before = shown.text.slice(0, text.indexOf('foobar') + 3 - shown.offset)
+  assert.equal(body.targetOrdinal, before.split('bar').length - 1)
+  assert.ok(body.targetOrdinal < 300)
 })
 
 test('context rejects unknown messages, out-of-range windows, and missing queries', async () => {

@@ -179,42 +179,65 @@ export function literalMatcher(strings) {
   return sources.length === 0 ? null : new RegExp(sources.join('|'), 'giu')
 }
 
+/** Folded text kept on each side of the target's first match, to recognise it in rendered text. */
+export const SURROUNDING_CHARS = 120
+
 /**
  * What the browser needs to highlight a context window without running the
  * user's query: the distinct matched strings (folded, at most `maxStrings`,
  * each at most `maxChars` long; the target message's first), the first
- * match in the target message, and its ordinal among the literal occurrences
- * of those strings in the target. Literal highlighting can mark text the
- * query itself did not match (a regex with anchors or lookarounds); the
- * ordinal lets the browser scroll to the real first match.
+ * match in the target message, and the folded text around it. Literal
+ * highlighting can mark text the query did not match (a regex with anchors or
+ * lookarounds); the surroundings let the browser find the real first match
+ * among the highlighted places, because rendered Markdown drops markup and
+ * link targets that raw-text positions would count.
  * @param {ReturnType<typeof conversationDocuments>} messages - the window's messages, full text.
  * @param {ReturnType<typeof compileQuery>} plan - compiled query.
  * @param {number} targetSeq - seq of the found message.
  * @param {{ maxStrings: number, maxChars: number }} limits - bounds on the returned strings.
- * @returns {{ strings: string[], targetFirst: number | null, targetOrdinal: number | null }} highlight data.
+ * @returns {{ strings: string[], targetFirst: number | null, targetBefore: string, targetAfter: string }} highlight data.
  */
 export function matchedStrings(messages, plan, targetSeq, limits) {
   const strings = new Set()
   let targetFirst = null
+  let targetEnd = null
   const ordered = [...messages.filter(message => message.seq === targetSeq), ...messages.filter(message => message.seq !== targetSeq)]
   for (const message of ordered) {
     const folded = foldText(message.text)
     for (const [start, end] of occurrences(folded, plan.any)) {
-      if (message.seq === targetSeq && targetFirst === null) targetFirst = start
+      if (message.seq === targetSeq && targetFirst === null) { targetFirst = start; targetEnd = end }
       if (strings.size < limits.maxStrings && end - start <= limits.maxChars) strings.add(folded.slice(start, end))
     }
   }
-  let targetOrdinal = null
-  const literal = literalMatcher([...strings])
+  let targetBefore = ''
+  let targetAfter = ''
   const target = ordered[0]
-  if (literal !== null && targetFirst !== null && target?.seq === targetSeq) {
-    let ordinal = 0
-    for (const [start] of occurrences(foldText(target.text), literal)) {
-      if (start >= targetFirst) { targetOrdinal = ordinal; break }
-      ordinal += 1
-    }
+  if (targetFirst !== null && target?.seq === targetSeq) {
+    const folded = foldText(target.text)
+    targetBefore = folded.slice(Math.max(0, targetFirst - SURROUNDING_CHARS), targetFirst)
+    targetAfter = folded.slice(targetEnd, targetEnd + SURROUNDING_CHARS)
   }
-  return { strings: [...strings], targetFirst, targetOrdinal }
+  return { strings: [...strings], targetFirst, targetBefore, targetAfter }
+}
+
+/**
+ * Ordinal of the literal occurrence of `strings` that starts at or after
+ * `first` in `text` (the text the browser is shown, already cropped): a
+ * tie-breaker for the browser when several highlighted places look alike.
+ * @param {string} text - shown target text.
+ * @param {string[]} strings - matched strings.
+ * @param {number} first - offset of the real first match in `text`.
+ * @returns {number | null} ordinal, or null when no occurrence starts there.
+ */
+export function targetOrdinal(text, strings, first) {
+  const literal = literalMatcher(strings)
+  if (literal === null || first < 0) return null
+  let ordinal = 0
+  for (const [start] of occurrences(foldText(text), literal)) {
+    if (start >= first) return ordinal
+    ordinal += 1
+  }
+  return null
 }
 
 /**
@@ -236,7 +259,7 @@ export function contextWindow(documents, seq, before, after) {
 /**
  * Bound message texts for the response. A long target message keeps the part
  * around its first match (`focus`); other long messages keep their start.
- * `cutBefore` / `cutAfter` mark the omitted sides.
+ * `cutBefore` / `cutAfter` mark the omitted sides; `offset` is where the kept text starts.
  * @param {ReturnType<typeof conversationDocuments>} messages - window messages.
  * @param {number} targetSeq - seq of the found message.
  * @param {number | null} focus - index of the first match in the target, when known.
@@ -246,14 +269,14 @@ export function contextWindow(documents, seq, before, after) {
 export function boundMessages(messages, targetSeq, focus, maxChars) {
   return messages.map((message) => {
     const { text } = message
-    if (text.length <= maxChars) return { ...message, cutBefore: false, cutAfter: false }
+    if (text.length <= maxChars) return { ...message, offset: 0, cutBefore: false, cutAfter: false }
     const center = message.seq === targetSeq && focus !== null ? focus : 0
     let start = Math.max(0, Math.min(center - Math.floor(maxChars / 4), text.length - maxChars))
     // Never split a surrogate pair at either end.
     if (start > 0 && isLowSurrogate(text.charCodeAt(start))) start -= 1
     let end = Math.min(text.length, start + maxChars)
     if (end < text.length && isLowSurrogate(text.charCodeAt(end))) end -= 1
-    return { ...message, text: text.slice(start, end), cutBefore: start > 0, cutAfter: end < text.length }
+    return { ...message, text: text.slice(start, end), offset: start, cutBefore: start > 0, cutAfter: end < text.length }
   })
 }
 

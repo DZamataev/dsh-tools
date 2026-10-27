@@ -10,7 +10,7 @@
  * deadline, so a slow regular expression cannot block the Host.
  */
 
-import { boundMessages, compileQuery, contextWindow, conversationDocuments } from './search.js'
+import { boundMessages, compileQuery, contextWindow, conversationDocuments, targetOrdinal } from './search.js'
 import { runSearch, SearchStopped } from './run.js'
 
 /** Cordis function-plugin name. */
@@ -224,7 +224,7 @@ export function apply(ctx, config) {
     if (!conversation.ok) return conversation.response
     const window = contextWindow(conversation.documents, parsed.seq, parsed.before, parsed.after)
     if (window === null) return json(404, { error: 'no-message', message: `no conversation message at seq ${parsed.seq}` })
-    let highlight = { strings: null, targetFirst: null, targetOrdinal: null, error: null }
+    let highlight = { strings: null, targetFirst: null, targetBefore: '', targetAfter: '', error: null }
     try {
       const found = await runSearch({
         kind: 'highlight',
@@ -241,14 +241,22 @@ export function apply(ctx, config) {
       highlight.error = error instanceof SearchStopped ? error.reason : 'failed'
       if (highlight.error !== 'timeout') ctx.logger.warn(`session-find: highlight failed: ${error instanceof Error ? error.message : String(error)}`)
     }
+    const messages = boundMessages(window.messages, parsed.seq, highlight.targetFirst ?? parsed.focus, config.maxMessageChars)
+    // Counted in the text the browser receives, not the full message.
+    const shown = messages.find(message => message.seq === parsed.seq)
+    const ordinal = highlight.strings !== null && highlight.targetFirst !== null && shown !== undefined
+      ? targetOrdinal(shown.text, highlight.strings, highlight.targetFirst - shown.offset)
+      : null
     return json(200, {
       sessionId: parsed.sessionId,
       seq: parsed.seq,
-      messages: boundMessages(window.messages, parsed.seq, highlight.targetFirst ?? parsed.focus, config.maxMessageChars),
+      messages,
       hasEarlier: window.hasEarlier,
       hasLater: window.hasLater,
       highlights: highlight.strings,
-      targetOrdinal: highlight.targetOrdinal,
+      targetOrdinal: ordinal,
+      targetBefore: highlight.targetBefore,
+      targetAfter: highlight.targetAfter,
       highlightError: highlight.error,
     })
   }

@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
     const CONTEXT_INITIAL = 3
     const CONTEXT_STEP = 5
     const CONTEXT_MAX = 100
+    const ANCHOR_SPAN = 300
     const ROLES = { all: ['user', 'assistant'], user: ['user'], assistant: ['assistant'] }
 
     const en = {
@@ -410,16 +411,24 @@ window.__ModuleLoader__.load({
         message.cutAfter && h('div', { className: 'sf-cut' }, t('context.cutAfter')))
     }
 
-    /** Paint every match inside the messages through the CSS Custom Highlight API; returns the ranges inside `target`. */
+    /**
+     * Paint every match inside the messages through the CSS Custom Highlight
+     * API. Returns the ranges inside `target` with their offsets in
+     * `targetText`, the target's rendered text (text nodes concatenated).
+     */
     function paintMatches(root, matcher, target) {
       const ranges = []
       const inTarget = []
+      let targetText = ''
       for (const message of root.querySelectorAll('.sf-message')) {
         const walker = document.createTreeWalker(message, NodeFilter.SHOW_TEXT)
         for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
           // The copy button and meta row carry no message text.
           if (node.parentElement?.closest('.sf-meta') !== null) continue
           const text = foldText(node.nodeValue ?? '')
+          const inTargetNode = target !== null && target.contains(node)
+          const base = targetText.length
+          if (inTargetNode) targetText += text
           matcher.lastIndex = 0
           let match
           while ((match = matcher.exec(text)) !== null) {
@@ -432,7 +441,7 @@ window.__ModuleLoader__.load({
             range.setStart(node, match.index)
             range.setEnd(node, match.index + match[0].length)
             ranges.push(range)
-            if (target !== null && target.contains(node)) inTarget.push(range)
+            if (inTargetNode) inTarget.push({ range, at: base + match.index, end: base + match.index + match[0].length })
           }
         }
       }
@@ -441,7 +450,51 @@ window.__ModuleLoader__.load({
       } else {
         console.warn('session-find: this browser has no CSS Custom Highlight API; matches stay unhighlighted')
       }
-      return { inTarget, count: ranges.length }
+      return { inTarget, targetText, count: ranges.length }
+    }
+
+    // Letters and digits only, so Markdown markup and dropped link targets do
+    // not decide the comparison.
+    const comparable = text => foldText(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    function sharedSuffix(a, b) {
+      let n = 0
+      while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n += 1
+      return n
+    }
+    function sharedPrefix(a, b) {
+      let n = 0
+      while (n < a.length && n < b.length && a[n] === b[n]) n += 1
+      return n
+    }
+    /**
+     * The highlighted place in the target that is the query's real first
+     * match: the one whose rendered surroundings best agree with the raw text
+     * the Host saw around it; ties go to the Host's ordinal (counted in the
+     * shown raw text), then to the earlier place. Only places within
+     * ANCHOR_SPAN of the ordinal are compared: rendering shifts the count by
+     * the occurrences it drops, far fewer than that.
+     */
+    function pickAnchor(candidates, targetText, before, after, ordinal) {
+      const wantBefore = comparable(before ?? '')
+      const wantAfter = comparable(after ?? '')
+      let best = null
+      let bestScore = -1
+      let bestDistance = Infinity
+      const hint = Math.min(ordinal ?? 0, Math.max(0, candidates.length - 1))
+      const from = Math.max(0, hint - ANCHOR_SPAN)
+      const to = Math.min(candidates.length, hint + ANCHOR_SPAN + 1)
+      for (let index = from; index < to; index += 1) {
+        const candidate = candidates[index]
+        const score = sharedSuffix(comparable(targetText.slice(Math.max(0, candidate.at - 200), candidate.at)), wantBefore)
+          + sharedPrefix(comparable(targetText.slice(candidate.end, candidate.end + 200)), wantAfter)
+        const distance = Math.abs(index - hint)
+        if (score > bestScore || (score === bestScore && distance < bestDistance)) {
+          best = candidate
+          bestScore = score
+          bestDistance = distance
+        }
+      }
+      return best
     }
 
     function ContextView({ state, more, t }) {
@@ -469,15 +522,15 @@ window.__ModuleLoader__.load({
         }
         const matcher = literalMatcher(data.highlights ?? [])
         const target = () => root.querySelector(`[data-seq="${context.seq}"]`)
-        const paint = () => (matcher === null ? { inTarget: [], count: 0 } : paintMatches(root, matcher, target()))
+        const paint = () => (matcher === null ? { inTarget: [], targetText: '', count: 0 } : paintMatches(root, matcher, target()))
         const painted = paint()
         if (data.highlights !== null && painted.count === 0) console.warn('session-find: no match found in the rendered context text')
         if (context.keep !== null) {
           root.querySelector(`[data-seq="${context.keep}"]`)?.scrollIntoView({ block: 'start' })
         } else if (context.placed === false) {
-          // Literal highlighting can mark text the query did not match; the Host's
-          // ordinal names which highlighted occurrence is the real first match.
-          const first = painted.inTarget[data.targetOrdinal ?? 0] ?? painted.inTarget[0] ?? null
+          // Literal highlighting can mark text the query did not match; pick the
+          // highlighted place that is the real first match.
+          const first = pickAnchor(painted.inTarget, painted.targetText, data.targetBefore, data.targetAfter, data.targetOrdinal)?.range ?? null
           const anchor = first?.startContainer.parentElement ?? target()
           anchor?.scrollIntoView({ block: first === null ? 'start' : 'center' })
         }
