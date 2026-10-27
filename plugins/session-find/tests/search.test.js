@@ -182,8 +182,8 @@ test('the browser picks the real match among look-alike highlights in rendered t
   const { readFileSync } = await import('node:fs')
   const src = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
   const helpers = src.slice(src.indexOf('    const SPECIAL'), src.indexOf('    function readJson'))
-  const anchor = src.slice(src.indexOf('    const comparable'), src.indexOf('    function ContextView'))
-  const { pickAnchor, literalMatcher: matcherOf } = new Function('const ANCHOR_SPAN = 300\n' + helpers + anchor + '; return { pickAnchor, literalMatcher }')()
+  const anchor = src.slice(src.indexOf('    // Letters and digits only'), src.indexOf('    function ContextView'))
+  const { pickAnchor, literalMatcher: matcherOf } = new Function(helpers + anchor + '; return { pickAnchor, literalMatcher }')()
   const candidatesIn = (text, strings) => [...occurrences(foldText(text), matcherOf(strings))].map(([at, end]) => ({ at, end }))
   // Raw Markdown: the link target holds a look-alike the renderer drops.
   const raw = '[bar](https://bar.example) foobar'
@@ -200,6 +200,19 @@ test('the browser picks the real match among look-alike highlights in rendered t
   const shownOrdinal = targetOrdinal(shown.text, hit.strings, hit.targetFirst - shown.offset)
   const choice = pickAnchor(candidatesIn(shown.text, hit.strings), shown.text, hit.targetBefore, hit.targetAfter, shownOrdinal)
   assert.equal(choice.at, hit.targetFirst - shown.offset)
+  // Many hidden look-alikes before the match: the ordinal is far off, the scan still finds it.
+  const linky = '[x](https://bar.example)\n'.repeat(400) + 'foobar UNIQUEFIRST' + '\nother bar'.repeat(400)
+  const far = matchedStrings([{ seq: 1, text: linky }], plan, 1, { maxStrings: 10, maxChars: 100 })
+  const farOrdinal = targetOrdinal(linky, far.strings, far.targetFirst)
+  const linkyRendered = 'x\n'.repeat(400) + 'foobar UNIQUEFIRST' + '\nother bar'.repeat(400)
+  const farChoice = pickAnchor(candidatesIn(linkyRendered, far.strings), linkyRendered, far.targetBefore, far.targetAfter, farOrdinal)
+  assert.equal(farOrdinal, 400)
+  assert.equal(farChoice.at, linkyRendered.indexOf('foobar') + 3)
+  // A full scan stays cheap on a long message with many candidates.
+  const huge = 'a bar '.repeat(30_000)
+  const started = Date.now()
+  pickAnchor(candidatesIn(huge, ['bar']), huge, 'a ', ' a', 29_999)
+  assert.ok(Date.now() - started < 1_000, '30k candidates scored within a second')
 })
 
 test('search results carry the offset of their first match', () => {

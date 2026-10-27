@@ -32,7 +32,6 @@ window.__ModuleLoader__.load({
     const CONTEXT_INITIAL = 3
     const CONTEXT_STEP = 5
     const CONTEXT_MAX = 100
-    const ANCHOR_SPAN = 300
     const ROLES = { all: ['user', 'assistant'], user: ['user'], assistant: ['assistant'] }
 
     const en = {
@@ -455,45 +454,62 @@ window.__ModuleLoader__.load({
 
     // Letters and digits only, so Markdown markup and dropped link targets do
     // not decide the comparison.
+    const LETTER_OR_DIGIT = /^[\p{L}\p{N}]+$/u
     const comparable = text => foldText(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
-    function sharedSuffix(a, b) {
+    /**
+     * `comparable(text)` built once, with `map[i]` = its length before
+     * `text[i]`, so every candidate is scored by direct character comparison.
+     */
+    function comparableIndex(text) {
+      const map = new Int32Array(text.length + 1)
+      let comp = ''
+      for (let i = 0; i < text.length;) {
+        const char = String.fromCodePoint(text.codePointAt(i))
+        map[i] = comp.length
+        if (char.length === 2) map[i + 1] = comp.length
+        const lower = char.toLowerCase()
+        if (LETTER_OR_DIGIT.test(lower)) comp += lower
+        i += char.length
+      }
+      map[text.length] = comp.length
+      return { comp, map }
+    }
+    /** Length of the shared tail of comp[0, end) and want, at most want.length. */
+    function sharedSuffix(comp, end, want) {
       let n = 0
-      while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n += 1
+      while (n < want.length && n < end && comp[end - 1 - n] === want[want.length - 1 - n]) n += 1
       return n
     }
-    function sharedPrefix(a, b) {
+    /** Length of the shared head of comp[start, …) and want, at most want.length. */
+    function sharedPrefix(comp, start, want) {
       let n = 0
-      while (n < a.length && n < b.length && a[n] === b[n]) n += 1
+      while (n < want.length && start + n < comp.length && comp[start + n] === want[n]) n += 1
       return n
     }
     /**
      * The highlighted place in the target that is the query's real first
      * match: the one whose rendered surroundings best agree with the raw text
-     * the Host saw around it; ties go to the Host's ordinal (counted in the
-     * shown raw text), then to the earlier place. Only places within
-     * ANCHOR_SPAN of the ordinal are compared: rendering shifts the count by
-     * the occurrences it drops, far fewer than that.
+     * the Host saw around it (all places are scored; Markdown may drop any
+     * number of look-alikes, so the Host's ordinal only breaks ties).
      */
     function pickAnchor(candidates, targetText, before, after, ordinal) {
+      if (candidates.length === 0) return null
       const wantBefore = comparable(before ?? '')
       const wantAfter = comparable(after ?? '')
+      const { comp, map } = comparableIndex(targetText)
+      const hint = Math.min(ordinal ?? 0, candidates.length - 1)
       let best = null
       let bestScore = -1
       let bestDistance = Infinity
-      const hint = Math.min(ordinal ?? 0, Math.max(0, candidates.length - 1))
-      const from = Math.max(0, hint - ANCHOR_SPAN)
-      const to = Math.min(candidates.length, hint + ANCHOR_SPAN + 1)
-      for (let index = from; index < to; index += 1) {
-        const candidate = candidates[index]
-        const score = sharedSuffix(comparable(targetText.slice(Math.max(0, candidate.at - 200), candidate.at)), wantBefore)
-          + sharedPrefix(comparable(targetText.slice(candidate.end, candidate.end + 200)), wantAfter)
+      candidates.forEach((candidate, index) => {
+        const score = sharedSuffix(comp, map[candidate.at], wantBefore) + sharedPrefix(comp, map[candidate.end], wantAfter)
         const distance = Math.abs(index - hint)
         if (score > bestScore || (score === bestScore && distance < bestDistance)) {
           best = candidate
           bestScore = score
           bestDistance = distance
         }
-      }
+      })
       return best
     }
 
