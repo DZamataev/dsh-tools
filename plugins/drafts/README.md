@@ -4,7 +4,7 @@ A DSH Web UI plugin. On the New Session page it adds a compact **Чернови�
 
 - A row shows the first non-empty line of the draft, the Workspace when it differs from the current one, and the relative time of the Session (`updatedAt`).
 - Clicking a row calls `uiWorkspace.openSession(id)`; the composer of that Session restores its own draft.
-- The trash button calls `uiWorkspace.archiveSession(id)`, the same operation as the sidebar's Archive; `uiWorkspace.unarchiveSession(id)` reverses it.
+- The trash button calls `uiWorkspace.archiveSession(id)`, the same operation as the sidebar's Archive; `uiWorkspace.unarchiveSession(id)` reverses it. While the call is pending the button ignores clicks and keeps focus; after the row disappears, focus moves to the row now at its position. Archiving the last draft removes the button itself, so focus returns to the page.
 - Without drafts nothing renders.
 
 ## Data sources
@@ -15,7 +15,9 @@ A DSH Web UI plugin. On the New Session page it adds a compact **Чернови�
 | Workspace membership and titles, archive set | slot hook `useWorkspaces` (`items`, `archivedSessionIds`) |
 | Draft text | `localStorage["dsh.conversation.<sessionId>"].draft`: a string (legacy) or `{ text, references, command? }`; read only |
 
-The current Session, archived Sessions, subagent Sessions, and drafts with neither text nor references are excluded. The list re-reads storage when the menu opens, when the Session or Workspace list changes, when the page becomes visible, and on `storage` events from other tabs.
+A structured draft is listed only when it passes the same checks as ui-conversation `parseStoredDraft` (complete reference fields, ordered reference spans that match `text`, a leading `/command` token that `text` starts with); DSH restores any other value as an empty composer. References are inline mentions inside `text`, so a draft counts as empty exactly when its text is blank.
+
+The current Session, archived Sessions, subagent Sessions, and empty or unrestorable drafts are excluded. The list re-reads storage when the menu opens, when the Session or Workspace list changes, when the page becomes visible, and on `storage` events from other tabs.
 
 ## Files
 

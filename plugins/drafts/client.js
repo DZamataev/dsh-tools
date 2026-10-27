@@ -26,7 +26,6 @@ window.__ModuleLoader__.load({
       'button.aria': 'Unfinished drafts: {n}',
       'title': 'Drafts',
       'row.open': 'Open draft: {text}',
-      'row.noText': 'Attachments only ({n})',
       'archive': 'Delete draft',
       'archive.aria': 'Delete draft (archive the session): {text}',
       'archive.failed': 'Could not archive: {message}',
@@ -41,7 +40,6 @@ window.__ModuleLoader__.load({
       'button.aria': 'Незаконченные черновики: {n}',
       'title': 'Черновики',
       'row.open': 'Открыть черновик: {text}',
-      'row.noText': 'Только вложения ({n})',
       'archive': 'Удалить черновик',
       'archive.aria': 'Удалить черновик (архивировать сессию): {text}',
       'archive.failed': 'Не удалось архивировать: {message}',
@@ -56,7 +54,6 @@ window.__ModuleLoader__.load({
       'button.aria': '未完成的草稿：{n}',
       'title': '草稿',
       'row.open': '打开草稿：{text}',
-      'row.noText': '仅附件 ({n})',
       'archive': '删除草稿',
       'archive.aria': '删除草稿（归档会话）：{text}',
       'archive.failed': '归档失败：{message}',
@@ -85,14 +82,13 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
 .dd-open{display:flex;flex:1;flex-direction:column;align-items:stretch;gap:1px;min-width:0;padding:6px 8px;border:none;border-radius:var(--dsw-radius-md);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .dd-open:focus-visible,.dd-archive:focus-visible{outline:none;background:var(--dsw-alias-interactive-bg-hover)}
 .dd-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}
-.dd-text[data-empty=true]{color:var(--dsw-alias-label-secondary);font-style:italic}
 .dd-meta{display:flex;gap:6px;min-width:0;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary))}
 .dd-workspace{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dd-time{flex:none}
 .dd-archive{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;margin:4px 4px 4px 0;padding:0;border:none;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-menu-icon, var(--dsw-alias-label-secondary));cursor:pointer;opacity:0}
 .dd-row:hover .dd-archive,.dd-row:focus-within .dd-archive,.dd-archive[aria-busy=true]{opacity:1}
-.dd-archive:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger, var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-state-error-primary)}
-.dd-archive:disabled{cursor:default;opacity:.4}
+.dd-archive:hover:not([aria-disabled=true]){background:var(--dsw-alias-interactive-bg-hover-danger, var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-state-error-primary)}
+.dd-archive[aria-disabled=true]{cursor:default;opacity:.4}
 .dd-archive svg{width:14px;height:14px}
 .dd-error{padding:4px 8px 6px;font-size:11px;line-height:16px;color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
 @media (hover: none){.dd-archive{opacity:1}}
@@ -100,9 +96,46 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
 
     // ---- pure helpers -------------------------------------------------------
 
+    const isNonNegativeInteger = value => Number.isInteger(value) && value >= 0
+    const REFERENCE_APPEARANCES = new Set(['session', 'file', 'folder'])
+
+    function isReference(value) {
+      return value !== null && typeof value === 'object'
+        && typeof value.source === 'string' && typeof value.ref === 'string'
+        && isNonNegativeInteger(value.offset) && Number.isInteger(value.length) && value.length > 0
+        && typeof value.label === 'string' && typeof value.clipboardText === 'string'
+        && (value.appearance === undefined || REFERENCE_APPEARANCES.has(value.appearance))
+        && (value.invalid === undefined || typeof value.invalid === 'boolean')
+    }
+
+    /**
+     * Mirror of ui-conversation `parseStoredDraft` (draft.ts): a structured draft
+     * DSH would reject restores as empty, so it must not be listed. References
+     * are inline mentions occupying ordered spans of `text`, after an optional
+     * leading `/command` token.
+     */
+    function isRestorableSnapshot(draft) {
+      if (typeof draft.text !== 'string' || !Array.isArray(draft.references)) return false
+      if (!draft.references.every(isReference)) return false
+      let end = 0
+      if (draft.command !== undefined) {
+        if (draft.command === null || typeof draft.command !== 'object' || typeof draft.command.token !== 'string') return false
+        const spelling = draft.command.token.trimEnd()
+        if (!/^\/\S/u.test(spelling) || !draft.text.startsWith(spelling)) return false
+        end = spelling.length
+      }
+      for (const reference of draft.references) {
+        if (reference.offset < end || reference.length !== reference.clipboardText.length) return false
+        end = reference.offset + reference.length
+        if (end > draft.text.length || draft.text.slice(reference.offset, end) !== reference.clipboardText) return false
+      }
+      return true
+    }
+
     /**
      * Parse one persisted composer value. `draft` is either the legacy string or
-     * `{ text, references, command? }`; anything else counts as no draft.
+     * `{ text, references, command? }` as accepted by DSH; anything else, and
+     * whitespace-only text, counts as no draft.
      */
     function readDraft(sessionId) {
       let raw
@@ -121,11 +154,10 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
         return null
       }
       const draft = stored !== null && typeof stored === 'object' ? stored.draft : undefined
-      if (typeof draft === 'string') return draft.trim() === '' ? null : { text: draft, references: 0 }
-      if (draft === null || typeof draft !== 'object' || typeof draft.text !== 'string') return null
-      const references = Array.isArray(draft.references) ? draft.references.length : 0
-      if (draft.text.trim() === '' && references === 0) return null
-      return { text: draft.text, references }
+      if (typeof draft === 'string') return draft.trim() === '' ? null : { text: draft }
+      if (draft === null || typeof draft !== 'object' || !isRestorableSnapshot(draft)) return null
+      // Every reference spans part of `text`, so a draft is empty exactly when its text is blank.
+      return draft.text.trim() === '' ? null : { text: draft.text }
     }
 
     function firstLine(text) {
@@ -197,18 +229,16 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
     // ---- components ---------------------------------------------------------
 
     function DraftRow({ entry, label, workspaceLabel, timeLabel, busy, onOpen, onArchive, t }) {
-      const empty = label === ''
-      const shown = empty ? t('row.noText', { n: entry.draft.references }) : label
       return h('li', { className: 'dd-row' },
         h('button', {
           type: 'button',
           className: 'dd-open',
           'data-dd-focus': '',
-          'aria-label': t('row.open', { text: shown }),
-          title: entry.draft.text.trim() === '' ? undefined : entry.draft.text.slice(0, 600),
+          'aria-label': t('row.open', { text: label }),
+          title: entry.draft.text.slice(0, 600),
           onClick: onOpen,
         },
-        h('span', { className: 'dd-text', 'data-empty': String(empty) }, shown),
+        h('span', { className: 'dd-text' }, label),
         h('span', { className: 'dd-meta' },
           workspaceLabel !== null && h('span', { className: 'dd-workspace' }, workspaceLabel),
           workspaceLabel !== null && h('span', { 'aria-hidden': true }, '·'),
@@ -217,15 +247,16 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
           type: 'button',
           className: 'dd-archive',
           'data-dd-focus': '',
-          'aria-label': t('archive.aria', { text: shown }),
+          'aria-label': t('archive.aria', { text: label }),
           'aria-busy': busy,
+          // aria-disabled, not disabled: a disabled button drops keyboard focus to <body>.
+          'aria-disabled': busy,
           title: t('archive'),
-          disabled: busy,
-          onClick: onArchive,
+          onClick: () => { if (!busy) onArchive() },
         }, h(ArchiveIcon)))
     }
 
-    function DraftsMenu({ drafts, currentWorkspaceId, t, menuRef, anchorRef, onOpen, onArchive, pending, error, onClose }) {
+    function DraftsMenu({ drafts, currentWorkspaceId, t, menuRef, anchorRef, focusAfterRemoval, onOpen, onArchive, pending, error, onClose }) {
       const [position, setPosition] = React.useState(null)
       const anchorName = `--dd-menu-${React.useId().replaceAll(':', '')}`
 
@@ -248,6 +279,19 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
       React.useEffect(() => {
         if (placed) menuRef.current?.querySelector('[data-dd-focus]')?.focus()
       }, [placed])
+
+      // An archived row unmounts with the focus it held; hand the focus to the
+      // row now at its position (or the new last row) so the keyboard keeps
+      // reaching this dialog.
+      React.useLayoutEffect(() => {
+        const index = focusAfterRemoval.current
+        if (index === null) return
+        const menu = menuRef.current
+        if (menu === null || menu.contains(document.activeElement)) return
+        focusAfterRemoval.current = null
+        const items = menu.querySelectorAll('.dd-open')
+        if (items.length > 0) items[Math.min(index, items.length - 1)].focus()
+      }, [drafts])
 
       const onKeyDown = (event) => {
         if (event.key === 'Escape') {
@@ -322,6 +366,7 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
       const [error, setError] = React.useState(null)
       const anchorRef = React.useRef(null)
       const menuRef = React.useRef(null)
+      const focusAfterRemoval = React.useRef(null)
 
       const drafts = React.useMemo(
         () => collectDrafts(sessionId, sessions, workspaces),
@@ -357,8 +402,12 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
       const archive = (id) => {
         setError(null)
         setPending(previous => new Set(previous).add(id))
+        const index = drafts.findIndex(entry => entry.sessionId === id)
         void archiveSession(id).then(
-          () => { refresh() },
+          () => {
+            focusAfterRemoval.current = index
+            refresh()
+          },
           (reason) => {
             const message = typeof reason?.message === 'string' ? reason.message : String(reason)
             setError(t('archive.failed', { message }))
@@ -395,6 +444,7 @@ html[data-platform='darwin'] .dd-backing{display:block;position:fixed;top:anchor
           t,
           menuRef,
           anchorRef,
+          focusAfterRemoval,
           pending,
           error,
           onClose: close,
