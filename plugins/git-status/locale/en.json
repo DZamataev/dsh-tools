@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git Branch and Directory",
+    "description": "Shows the session's git branch in the status bar under the composer. Its panel lists the working directory with a copy-path button, the directory size, upstream, last commit, and a short git status."
+  }
+}

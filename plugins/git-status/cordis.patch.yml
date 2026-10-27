@@ -1,0 +1,4 @@
+- insert:
+    - id: git-status
+      name: '@local/dsh-git-status'
+      config: {}
