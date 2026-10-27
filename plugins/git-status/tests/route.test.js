@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apply, Config, SIZE_PATH, SUMMARY_PATH } from '../index.js'
+import { apply, Config, PULL_PATH, REVIEW_PATH, SIZE_PATH, SUMMARY_PATH } from '../index.js'
 
 let root
 let repo
@@ -61,9 +61,9 @@ function mount(overrides = {}) {
   return { routes, call, unload, counts: () => ({ observed, disposed }) }
 }
 
-test('registers both POST routes and removes them on unload', async () => {
+test('registers every POST route and removes them on unload', async () => {
   const m = mount()
-  assert.deepEqual([...m.routes.keys()], [SUMMARY_PATH, SIZE_PATH])
+  assert.deepEqual([...m.routes.keys()], [SUMMARY_PATH, SIZE_PATH, REVIEW_PATH, PULL_PATH])
   for (const route of m.routes.values()) assert.deepEqual(route.methods, ['POST'])
   await m.unload()
   assert.equal(m.routes.size, 0)

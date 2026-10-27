@@ -12,6 +12,8 @@ window.__ModuleLoader__.load({
     const NS = 'git-status'
     const SUMMARY_ROUTE = 'api/git-status.summary'
     const SIZE_ROUTE = 'api/git-status.size'
+    const PULL_ROUTE = 'api/git-status.pull'
+    const REVIEW_ROUTE = 'api/git-status.review'
     const DEFAULT_POLL_MS = 10_000
     const PANEL_WIDTH = 400
     const PANEL_MARGIN = 12
@@ -60,6 +62,29 @@ window.__ModuleLoader__.load({
       'ago.minutes': '{n} min ago',
       'ago.hours': '{n} h ago',
       'ago.days': '{n} d ago',
+      'pull': 'Pull',
+      'pull.busy': 'Pulling…',
+      'pull.title': 'git fetch, then fast-forward to {upstream}; nothing is merged or rebased',
+      'pull.running': 'Wait for the agent to finish its turn',
+      'pull.upToDate': 'Already up to date with {upstream}.',
+      'pull.upToDateAhead': 'Up to date with {upstream}; {n} local commit(s) not pushed.',
+      'pull.done': 'Fast-forwarded {n} commit(s): {from} → {to}.',
+      'pull.diverged': 'The branch has diverged from {upstream} (↑{ahead} ↓{behind}); merge or rebase it yourself.',
+      'pull.localChanges': 'Local changes would be overwritten: {files}. Commit or stash them first.',
+      'pull.fetchFailed': 'git fetch failed: {message}',
+      'pull.timeout': 'Pull took too long.',
+      'pull.busyRepo': 'Another pull is running in this repository.',
+      'pull.detached': 'HEAD is detached; there is no branch to pull.',
+      'pull.noUpstream': 'The branch has no upstream.',
+      'pull.failed': 'Pull failed: {message}',
+      'review': 'Review in Zed',
+      'review.busy': 'Opening…',
+      'review.title': 'Open the changes against HEAD in one Zed diff; edits on the right save into the files',
+      'review.done': 'Opened {n} file(s) in Zed.',
+      'review.truncated': 'Opened the first {n} of {total} changed files in Zed.',
+      'review.clean': 'No changes to review.',
+      'review.missing': 'Zed CLI not found; set zedPath in the plugin config.',
+      'review.failed': 'Could not open Zed: {message}',
     }
     const ru = {
       'pill.aria': 'Ветка {branch} в {path}',
@@ -103,6 +128,29 @@ window.__ModuleLoader__.load({
       'ago.minutes': '{n} мин назад',
       'ago.hours': '{n} ч назад',
       'ago.days': '{n} дн назад',
+      'pull': 'Подтянуть',
+      'pull.busy': 'Подтягиваю…',
+      'pull.title': 'git fetch и перемотка вперёд до {upstream}; без merge и rebase',
+      'pull.running': 'Дождитесь, пока агент закончит ход',
+      'pull.upToDate': 'Уже совпадает с {upstream}.',
+      'pull.upToDateAhead': 'Совпадает с {upstream}; не отправлено локальных коммитов: {n}.',
+      'pull.done': 'Подтянуто коммитов: {n} ({from} → {to}).',
+      'pull.diverged': 'Ветка разошлась с {upstream} (↑{ahead} ↓{behind}) — слейте или сделайте rebase вручную.',
+      'pull.localChanges': 'Локальные изменения были бы перезаписаны: {files}. Сначала закоммитьте или уберите в stash.',
+      'pull.fetchFailed': 'git fetch не удался: {message}',
+      'pull.timeout': 'Подтягивание заняло слишком много времени.',
+      'pull.busyRepo': 'В этом репозитории уже идёт подтягивание.',
+      'pull.detached': 'HEAD отсоединён — нет ветки, которую можно подтянуть.',
+      'pull.noUpstream': 'У ветки нет upstream.',
+      'pull.failed': 'Не удалось подтянуть: {message}',
+      'review': 'Ревью в Zed',
+      'review.busy': 'Открываю…',
+      'review.title': 'Открыть изменения относительно HEAD одним diff в Zed; правки справа сохраняются в файлы',
+      'review.done': 'Открыто в Zed файлов: {n}.',
+      'review.truncated': 'Открыты в Zed первые {n} из {total} изменённых файлов.',
+      'review.clean': 'Нечего смотреть: изменений нет.',
+      'review.missing': 'Не найден Zed CLI — укажите zedPath в настройках плагина.',
+      'review.failed': 'Не удалось открыть Zed: {message}',
     }
     const zh = {
       'pill.aria': '{path} 中的分支 {branch}',
@@ -146,6 +194,29 @@ window.__ModuleLoader__.load({
       'ago.minutes': '{n} 分钟前',
       'ago.hours': '{n} 小时前',
       'ago.days': '{n} 天前',
+      'pull': '拉取',
+      'pull.busy': '拉取中…',
+      'pull.title': 'git fetch 后快进到 {upstream}；不做合并或变基',
+      'pull.running': '请等待智能体完成本轮',
+      'pull.upToDate': '已与 {upstream} 一致。',
+      'pull.upToDateAhead': '已与 {upstream} 一致；有 {n} 个本地提交尚未推送。',
+      'pull.done': '已快进 {n} 个提交（{from} → {to}）。',
+      'pull.diverged': '分支已与 {upstream} 分叉（↑{ahead} ↓{behind}），请手动合并或变基。',
+      'pull.localChanges': '本地修改会被覆盖：{files}。请先提交或暂存。',
+      'pull.fetchFailed': 'git fetch 失败：{message}',
+      'pull.timeout': '拉取耗时过长。',
+      'pull.busyRepo': '此仓库中已有拉取正在进行。',
+      'pull.detached': 'HEAD 处于游离状态，没有可拉取的分支。',
+      'pull.noUpstream': '该分支没有上游。',
+      'pull.failed': '拉取失败：{message}',
+      'review': '在 Zed 中审阅',
+      'review.busy': '正在打开…',
+      'review.title': '在 Zed 的一个差异视图中打开相对 HEAD 的修改；右侧的编辑会保存到文件',
+      'review.done': '已在 Zed 中打开 {n} 个文件。',
+      'review.truncated': '已在 Zed 中打开 {total} 个修改文件中的前 {n} 个。',
+      'review.clean': '没有需要审阅的修改。',
+      'review.missing': '未找到 Zed CLI，请在插件配置中设置 zedPath。',
+      'review.failed': '无法打开 Zed：{message}',
     }
 
     const CSS = `
@@ -185,6 +256,10 @@ window.__ModuleLoader__.load({
 .gs-button:disabled{cursor:default;opacity:.6}
 .gs-button[data-done=true]{color:var(--dsw-alias-state-success-primary)}
 .gs-link{padding:0 4px;font-size:11px}
+.gs-counts-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.gs-note{font-size:11px;color:var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary));overflow-wrap:anywhere}
+.gs-note[data-tone=error]{color:var(--dsw-alias-state-error-primary)}
+.gs-note[data-tone=done]{color:var(--dsw-alias-state-success-primary)}
 `
 
     // ---- pure helpers -------------------------------------------------------
@@ -325,7 +400,39 @@ window.__ModuleLoader__.load({
       ]
     }
 
-    function GitSection({ git, home, cwd, t }) {
+    /** One line describing the latest pull or review outcome. */
+    function actionNote(action, t) {
+      if (action === undefined || action === null || action.state === 'busy') return null
+      const data = action.data ?? {}
+      if (action.kind === 'pull') {
+        if (action.state === 'done') {
+          if (data.result === 'fast-forwarded') return { tone: 'done', text: t('pull.done', { n: data.commits, from: data.from, to: data.to }) }
+          return { tone: 'muted', text: data.ahead > 0 ? t('pull.upToDateAhead', { upstream: data.upstream, n: data.ahead }) : t('pull.upToDate', { upstream: data.upstream }) }
+        }
+        const text = data.error === 'diverged' ? t('pull.diverged', { upstream: data.upstream, ahead: data.ahead, behind: data.behind })
+          : data.error === 'local-changes' ? t('pull.localChanges', { files: (data.files ?? []).slice(0, 5).join(', ') + ((data.files ?? []).length > 5 ? ', …' : '') })
+            : data.error === 'fetch-failed' ? t('pull.fetchFailed', { message: data.message })
+              : data.error === 'timeout' ? t('pull.timeout')
+                : data.error === 'busy' ? t('pull.busyRepo')
+                  : data.error === 'detached' ? t('pull.detached')
+                    : data.error === 'no-upstream' ? t('pull.noUpstream')
+                      : t('pull.failed', { message: data.message || data.error || '?' })
+        return { tone: 'error', text }
+      }
+      if (action.state === 'done') {
+        if (data.opened !== true) return { tone: 'muted', text: t('review.clean') }
+        return { tone: 'done', text: data.truncated ? t('review.truncated', { n: data.files, total: data.total }) : t('review.done', { n: data.files }) }
+      }
+      return { tone: 'error', text: data.error === 'zed-missing' ? t('review.missing') : t('review.failed', { message: data.message || data.error || '?' }) }
+    }
+
+    function Note({ action, kind, t }) {
+      if (action?.kind !== kind) return null
+      const note = actionNote(action, t)
+      return note === null ? null : h('div', { className: 'gs-note', 'data-tone': note.tone, role: 'status' }, note.text)
+    }
+
+    function GitSection({ git, home, cwd, t, action, running, pull, review }) {
       if (git === null) return h('div', { className: 'gs-muted' }, t('notRepo'))
       if (git.error === 'git-missing') return h('div', { className: 'gs-error' }, t('git.missing'))
       if (git.error === 'timeout') return h('div', { className: 'gs-error' }, t('git.timeout'))
@@ -334,12 +441,22 @@ window.__ModuleLoader__.load({
       const branch = git.branch !== null
         ? (git.oid === null ? t('branch.unborn', { branch: git.branch }) : git.branch)
         : t('branch.detached', { sha: shortSha(git.oid) })
+      const pulling = action?.kind === 'pull' && action.state === 'busy'
+      const reviewing = action?.kind === 'review' && action.state === 'busy'
       const upstream = git.upstream === null
         ? h('span', { className: 'gs-muted' }, t('upstream.none'))
-        : h('span', null, git.upstream, ' ',
-          h('span', { className: 'gs-muted' }, git.ahead === 0 && git.behind === 0
-            ? `· ${t('upstream.sync')}`
-            : `· ${t('upstream.ab', { ahead: git.ahead ?? 0, behind: git.behind ?? 0 })}`))
+        : h('span', { className: 'gs-val-row' },
+          h('span', null, git.upstream, ' ',
+            h('span', { className: 'gs-muted' }, git.ahead === 0 && git.behind === 0
+              ? `· ${t('upstream.sync')}`
+              : `· ${t('upstream.ab', { ahead: git.ahead ?? 0, behind: git.behind ?? 0 })}`)),
+          git.branch !== null && h('button', {
+            type: 'button',
+            className: 'gs-button gs-link',
+            disabled: pulling || running,
+            title: running ? t('pull.running') : t('pull.title', { upstream: git.upstream }),
+            onClick: () => { pull() },
+          }, pulling ? t('pull.busy') : t('pull')))
       const counts = [
         ['staged', git.staged], ['unstaged', git.unstaged], ['untracked', git.untracked], ['conflicted', git.conflicted],
       ].filter(([, n]) => n > 0)
@@ -362,11 +479,21 @@ window.__ModuleLoader__.load({
             }, ` · ${git.lastCommit.author}`)),
           git.root !== null && git.root !== cwd && h('span', { className: 'gs-key' }, t('repository')),
           git.root !== null && git.root !== cwd && h('span', { className: 'gs-val gs-mono' }, abbreviate(git.root, home))),
+        h(Note, { action, kind: 'pull', t }),
         h('div', { className: 'gs-rule', 'aria-hidden': true }),
         counts.length === 0
           ? h('div', { className: 'gs-muted' }, t('changes.clean'))
-          : h('div', { className: 'gs-counts' }, counts.map(([kind, n]) =>
-            h('span', { key: kind, className: 'gs-count', 'data-kind': kind }, t(`changes.${kind}`, { n })))),
+          : h('div', { className: 'gs-counts-row' },
+            h('div', { className: 'gs-counts' }, counts.map(([kind, n]) =>
+              h('span', { key: kind, className: 'gs-count', 'data-kind': kind }, t(`changes.${kind}`, { n })))),
+            h('button', {
+              type: 'button',
+              className: 'gs-button gs-link',
+              disabled: reviewing,
+              title: t('review.title'),
+              onClick: () => { review() },
+            }, reviewing ? t('review.busy') : t('review'))),
+        h(Note, { action, kind: 'review', t }),
         git.lines.length > 0 && h('pre', { className: 'gs-status' },
           git.lines.map((line, index) => h('div', { key: index },
             h(StatusCode, { xy: line.xy }), ' ',
@@ -374,7 +501,7 @@ window.__ModuleLoader__.load({
           hidden > 0 && h('div', { className: 'gs-muted' }, t('changes.more', { n: hidden }))))
     }
 
-    function Panel({ entry, cwd, refresh, remeasure, t, panelRef, position }) {
+    function Panel({ entry, cwd, refresh, remeasure, t, panelRef, position, running, pull, review }) {
       const data = entry?.data ?? null
       const path = data?.cwd ?? cwd ?? ''
       const home = data?.home
@@ -389,7 +516,7 @@ window.__ModuleLoader__.load({
         data !== null && data.exists !== false && h(React.Fragment, null,
           h('div', { className: 'gs-grid' }, h(SizeRow, { size: entry.size, remeasure, t })),
           h('div', { className: 'gs-rule', 'aria-hidden': true }),
-          h(GitSection, { git: data.git, home, cwd: data.cwd, t })),
+          h(GitSection, { git: data.git, home, cwd: data.cwd, t, action: entry.action, running, pull, review })),
         h('div', { className: 'gs-foot' },
           h('button', { type: 'button', className: 'gs-button', disabled: entry?.loading === true, onClick: () => { refresh() } }, t('refresh'))))
     }
@@ -401,7 +528,7 @@ window.__ModuleLoader__.load({
       return { left, bottom: Math.max(PANEL_MARGIN, window.innerHeight - rect.top + PANEL_GAP) }
     }
 
-    function GitPill({ sessionId, useProjection, useSession, useGit, watch, refresh, measure, t }) {
+    function GitPill({ sessionId, useProjection, useSession, useGit, watch, refresh, measure, pull, review, clearAction, t }) {
       const cwd = useProjection('workingDirectory') ?? undefined
       const running = useSession(session => session.running === true)
       const entry = useGit(state => state.sessions[sessionId])
@@ -436,6 +563,8 @@ window.__ModuleLoader__.load({
           window.removeEventListener('scroll', place, true)
           document.removeEventListener('keydown', onKey)
           document.removeEventListener('pointerdown', onPointer, true)
+          // A reopened panel starts without the previous action's outcome.
+          clearAction(sessionId)
         }
       }, [open, sessionId])
 
@@ -471,6 +600,9 @@ window.__ModuleLoader__.load({
           cwd,
           refresh: () => { refresh(sessionId); measure(sessionId, true) },
           remeasure: () => { measure(sessionId, true) },
+          running,
+          pull: () => { pull(sessionId) },
+          review: () => { review(sessionId) },
           t,
           panelRef,
           position: position ?? { visibility: 'hidden', left: 0, bottom: 0 },
@@ -563,6 +695,39 @@ window.__ModuleLoader__.load({
           }
         }
 
+        /**
+         * Run one pull or review and keep its outcome on the Session's entry.
+         * Route refusals carry their reason in the JSON body, so a non-2xx
+         * answer is an outcome, not a transport failure.
+         */
+        async function act(kind, sessionId) {
+          if (disposed) return
+          if (store.getSnapshot().sessions[sessionId]?.action?.state === 'busy') return
+          patch(sessionId, () => ({ action: { kind, state: 'busy', data: null } }))
+          let state = 'error'
+          let data
+          try {
+            const response = await fetch(kind === 'pull' ? PULL_ROUTE : REVIEW_ROUTE, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            })
+            data = await response.json().catch(() => ({ error: 'failed', message: `HTTP ${response.status}` }))
+            if (response.ok) state = 'done'
+          } catch (error) {
+            data = { error: 'failed', message: error instanceof Error ? error.message : String(error) }
+          }
+          if (disposed) return
+          patch(sessionId, () => ({ action: { kind, state, data } }))
+          if (kind === 'pull') void refresh(sessionId)
+        }
+
+        const clearAction = (sessionId) => {
+          const action = store.getSnapshot().sessions[sessionId]?.action
+          if (action !== undefined && action !== null && action.state !== 'busy') patch(sessionId, () => ({ action: null }))
+        }
+
         // Poll each displayed Session while the page is visible.
         let timer = null
         const tick = () => {
@@ -609,6 +774,9 @@ window.__ModuleLoader__.load({
             watch,
             refresh: (sessionId) => { void refresh(sessionId) },
             measure: (sessionId, force) => { void measure(sessionId, force) },
+            pull: (sessionId) => { void act('pull', sessionId) },
+            review: (sessionId) => { void act('review', sessionId) },
+            clearAction,
           }),
         }, GitPill))
       },

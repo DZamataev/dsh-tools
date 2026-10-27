@@ -95,6 +95,44 @@ export function parseDuKilobytes(stdout) {
 }
 
 /**
+ * Parse `git rev-list --left-right --count HEAD...@{upstream}` output.
+ * @param {string} stdout - "<ahead>\t<behind>".
+ * @returns {{ ahead: number, behind: number } | null} counts, or null when unparseable.
+ */
+export function parseLeftRight(stdout) {
+  const match = /^(\d+)\s+(\d+)\s*$/.exec(stdout.trim())
+  return match === null ? null : { ahead: Number(match[1]), behind: Number(match[2]) }
+}
+
+/**
+ * Files git names when a merge would overwrite local changes.
+ * @param {string} stderr - `git merge` stderr in the C locale.
+ * @returns {string[]} indented file lines that follow the "would be overwritten" notice.
+ */
+export function overwrittenFiles(stderr) {
+  const lines = String(stderr).split('\n')
+  const start = lines.findIndex(line => /would be overwritten by merge/i.test(line))
+  if (start < 0) return []
+  const files = []
+  for (const line of lines.slice(start + 1)) {
+    if (!/^\s/.test(line) || line.trim() === '') break
+    files.push(line.trim())
+  }
+  return files
+}
+
+/**
+ * Old and new sides for one changed file in a review of HEAD against the working tree.
+ * @param {{ xy: string, path: string, orig: string | null }} line - one parsed status line.
+ * @returns {{ oldPath: string | null, newPath: string }} repository-relative paths; a null
+ *   `oldPath` means the file has no HEAD version (new or untracked).
+ */
+export function reviewSides(line) {
+  const added = line.xy === '??' || line.xy[0] === 'A'
+  return { oldPath: added ? null : (line.orig ?? line.path), newPath: line.path }
+}
+
+/**
  * Whether failed git output means the directory is outside any repository.
  * @param {string} stderr - git stderr.
  * @returns {boolean} true for "not a git repository".
