@@ -1,12 +1,12 @@
-/** Host-side search runner: one worker thread per search, bounded by a deadline. */
+/** Host-side query runner: one worker thread per query, bounded by a deadline. */
 import { Worker } from 'node:worker_threads'
 
 const WORKER_URL = new URL('./match-worker.js', import.meta.url)
 
-/** A search that did not finish: `timeout` past the deadline, `aborted` by the caller, `failed` otherwise. */
+/** A query that did not finish: `timeout` past the deadline, `aborted` by the caller, `failed` otherwise. */
 export class SearchStopped extends Error {
   /**
-   * @param {'timeout' | 'aborted' | 'failed'} reason - why the search stopped.
+   * @param {'timeout' | 'aborted' | 'failed'} reason - why the query stopped.
    * @param {string} [detail] - worker failure message, for `failed`.
    */
   constructor(reason, detail) {
@@ -17,11 +17,13 @@ export class SearchStopped extends Error {
 }
 
 /**
- * Match documents in a worker thread and terminate it at the deadline or on abort.
- * @param {{ documents: object[], query: string, regex: boolean, limits: object }} input - worker data; the query must already compile.
- * @param {number} timeoutMs - deadline for the whole search.
+ * Run one query in a worker thread and terminate it at the deadline or on
+ * abort. The returned promise settles only after the thread has stopped, so
+ * no worker outlives its caller.
+ * @param {{ kind: 'search' | 'highlight', documents: object[], query: string, regex: boolean, limits: object, targetSeq?: number }} input - worker data; the query must already compile.
+ * @param {number} timeoutMs - deadline for the whole query.
  * @param {AbortSignal} [signal] - caller cancellation.
- * @returns {Promise<ReturnType<import('./search.js').findMatches>>} matches.
+ * @returns {Promise<object>} the worker's result: `findMatches` output for `search`, `matchedStrings` output for `highlight`.
  */
 export function runSearch(input, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
@@ -33,9 +35,7 @@ export function runSearch(input, timeoutMs, signal) {
       settled = true
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
-      // terminate() resolves once the thread has stopped; nothing awaits it.
-      void worker.terminate()
-      settle()
+      worker.terminate().then(settle, settle)
     }
     const onAbort = () => { finish(() => { reject(new SearchStopped('aborted')) }) }
     const timer = setTimeout(() => { finish(() => { reject(new SearchStopped('timeout')) }) }, timeoutMs)

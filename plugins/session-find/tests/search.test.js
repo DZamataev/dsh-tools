@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compileQuery, conversationDocuments, findMatches } from '../search.js'
+import { advanceIndex, boundMessages, compileQuery, contextWindow, conversationDocuments, findMatches, foldText, literalMatcher, matchedStrings, occurrences, queryTerms } from '../search.js'
 import { parseRequest } from '../index.js'
 import { runSearch, SearchStopped } from '../run.js'
 
@@ -38,18 +38,52 @@ test('only human prompts and assistant text are conversation', () => {
   ])
 })
 
-test('literal search ignores case, flexes whitespace, and skips reasoning, tools, and injected context', () => {
-  const found = search('конфиг базы')
+test('a quoted phrase ignores case, flexes whitespace, and skips reasoning, tools, and injected context', () => {
+  const found = search('"конфиг базы"')
   assert.equal(found.totalMessages, 2)
   assert.equal(found.totalMatches, 2)
   assert.deepEqual(found.results.map(r => r.role), ['user', 'assistant'])
-  assert.equal(found.results[0].snippets[0].match, 'конфиг базы')
+  assert.equal(found.results[0].snippets[0].match, 'конфиг   базы'.replace(/\s+/g, ' '))
+})
+
+test('unquoted words match in any order and all must be present', () => {
+  const found = search('базы конфиг')
+  assert.equal(found.totalMessages, 2)
+  assert.equal(found.totalMatches, 4)
+  assert.equal(search('конфиг версию').totalMessages, 0)
+  assert.equal(search('лежит db.yml').totalMessages, 1)
+})
+
+test('query terms split words and quoted phrases, including an unclosed quote', () => {
+  assert.deepEqual(queryTerms('a "b  c" d'), ['a', 'b  c', 'd'])
+  assert.deepEqual(queryTerms('x "y z'), ['x', 'y z'])
+  assert.deepEqual(queryTerms('""  '), [])
+  assert.throws(() => compileQuery('""', false), SyntaxError)
+})
+
+test('a longer term wins over its prefix in one occurrence', () => {
+  const [snippet] = search('кон конфиг').results[0].snippets
+  assert.equal(snippet.match, 'конфиг')
 })
 
 test('literal search treats regex metacharacters as text', () => {
   assert.equal(search('1.2.3').totalMatches, 1)
   assert.equal(search('1x2x3').totalMatches, 0)
   assert.equal(search('db.yml').totalMatches, 1)
+})
+
+test('ё and е match each other in both directions and in regexes, keeping the original spelling', () => {
+  const documents = [
+    { seq: 0, time: 0, turn: 1, role: 'user', text: 'Ёлка стоит, всё ещё зелёная' },
+    { seq: 1, time: 0, turn: 1, role: 'assistant', text: 'Елка и все еще зеленая' },
+  ]
+  const find = (query, regex = false) => findMatches(documents, compileQuery(query, regex), LIMITS)
+  assert.equal(find('ёлка').totalMessages, 2)
+  assert.equal(find('елка').totalMessages, 2)
+  assert.equal(find('всё ещё').totalMessages, 2)
+  assert.equal(find('зел[её]ная', true).totalMessages, 2)
+  assert.equal(find('^Ёлка', true).totalMessages, 2)
+  assert.equal(find('ёлка').results[0].snippets[0].match, 'Ёлка')
 })
 
 test('regex search matches patterns and counts every match in a message', () => {
@@ -65,7 +99,7 @@ test('zero-length regex matches produce no results and terminate', () => {
 })
 
 test('snippets carry bounded context with cut markers', () => {
-  const [snippet] = search('лежит в').results[0].snippets
+  const [snippet] = search('"лежит в"').results[0].snippets
   assert.equal(snippet.match, 'лежит в')
   assert.equal(snippet.before, 'нфиг базы ')
   assert.equal(snippet.after, ' config/db')
@@ -78,6 +112,84 @@ test('results stop at maxResults while totals keep counting', () => {
   assert.equal(found.results.length, 1)
   assert.equal(found.totalMessages, 2)
   assert.equal(found.truncated, true)
+})
+
+test('the context window clamps at log edges', () => {
+  const documents = conversationDocuments(LOG)
+  const window = contextWindow(documents, documents[1].seq, 5, 0)
+  assert.deepEqual(window.messages.map(m => m.role), ['user', 'assistant'])
+  assert.equal(window.hasEarlier, false)
+  assert.equal(window.hasLater, true)
+  assert.equal(contextWindow(documents, 9999, 1, 1), null)
+})
+
+test('long messages are bounded: neighbours keep their start, the target keeps its match', () => {
+  const target = { seq: 1, text: `${'a'.repeat(100)}NEEDLE${'b'.repeat(100)}` }
+  const neighbour = { seq: 2, text: 'c'.repeat(300) }
+  const [cutTarget, cutNeighbour] = boundMessages([target, neighbour], 1, 100, 40)
+  assert.ok(cutTarget.text.includes('NEEDLE'))
+  assert.equal(cutTarget.text.length, 40)
+  assert.deepEqual([cutTarget.cutBefore, cutTarget.cutAfter], [true, true])
+  assert.equal(cutNeighbour.text, 'c'.repeat(40))
+  assert.deepEqual([cutNeighbour.cutBefore, cutNeighbour.cutAfter], [false, true])
+  const [short] = boundMessages([{ seq: 3, text: 'ok' }], 3, 0, 40)
+  assert.deepEqual([short.text, short.cutBefore, short.cutAfter], ['ok', false, false])
+  const [emoji] = boundMessages([{ seq: 4, text: `${'😀'.repeat(30)}` }], 4, null, 7)
+  assert.ok(!/[\ud800-\udbff]$/.test(emoji.text), 'no lone high surrogate at the end')
+})
+
+test('message text blocks are kept verbatim, blank-only messages are skipped', () => {
+  const code = '    console.log(1)\n    console.log(2)\n'
+  const documents = conversationDocuments([
+    { type: 'user/message', seq: 0, time: 0, data: { source: { kind: 'user' }, content: [{ type: 'text', text: code }] } },
+    { type: 'user/message', seq: 1, time: 0, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '  \n ' }] } },
+    { type: 'assistant/message', seq: 2, time: 0, data: { message: { content: [{ type: 'text', text: 'a ' }, { type: 'text', text: '   ' }, { type: 'text', text: ' b' }] } } },
+  ])
+  assert.deepEqual(documents.map(d => d.text), [code, 'a \n\n b'])
+})
+
+test('empty regex matches step over surrogate pairs instead of looping', () => {
+  const documents = [{ seq: 0, time: 0, turn: 1, role: 'user', text: '😀x😀' }]
+  const found = findMatches(documents, compileQuery('x*', true), LIMITS)
+  assert.equal(found.totalMatches, 1)
+  assert.deepEqual([...occurrences('😀😀', compileQuery('x*', true).any)], [])
+  assert.equal(advanceIndex('😀', 0), 2)
+  assert.equal(advanceIndex('ab', 0), 1)
+})
+
+test('target strings come first, so the string cap cannot drop the target highlight', () => {
+  const messages = [{ seq: 1, text: 'alpha' }, { seq: 2, text: 'beta' }]
+  const found = matchedStrings(messages, compileQuery('alpha|beta', true), 2, { maxStrings: 1, maxChars: 100 })
+  assert.deepEqual(found.strings, ['beta'])
+  assert.equal(found.targetOrdinal, 0)
+})
+
+test('search results carry the offset of their first match', () => {
+  const [row] = findMatches([{ seq: 0, time: 0, turn: 1, role: 'user', text: 'xx needle needle' }], compileQuery('needle', false), LIMITS).results
+  assert.equal(row.first, 3)
+})
+
+test('the client builds the same literal highlight matcher as the Host', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  const client = new Function(`${src.slice(src.indexOf('    const SPECIAL'), src.indexOf('    function readJson'))}; return { literalMatcher, foldText, advanceIndex }`)()
+  for (const strings of [['bar'], ['все  еще', 'a.b', 'needle'], ['  '], []]) {
+    assert.equal(String(client.literalMatcher(strings)), String(literalMatcher(strings)))
+  }
+  assert.equal(client.foldText('Ёлка ёж'), foldText('Ёлка ёж'))
+  assert.equal(client.advanceIndex('😀', 0), advanceIndex('😀', 0))
+})
+
+test('matched strings for highlighting are distinct, folded, bounded, and locate the target', () => {
+  const messages = [
+    { seq: 1, text: 'Ёлка, елка и ЁЛКА' },
+    { seq: 2, text: 'ещё одна ёлка' },
+  ]
+  const found = matchedStrings(messages, compileQuery('ёлка', false), 2, { maxStrings: 10, maxChars: 100 })
+  assert.deepEqual(found.strings.sort(), ['ЕЛКА', 'Елка', 'елка'])
+  assert.equal(found.targetFirst, 9)
+  assert.equal(matchedStrings(messages, compileQuery('ёлка', false), 1, { maxStrings: 1, maxChars: 100 }).strings.length, 1)
+  assert.deepEqual(matchedStrings(messages, compileQuery('ёлка', false), 1, { maxStrings: 10, maxChars: 3 }).strings, [])
 })
 
 test('request validation rejects empty, long, and invalid regex queries', () => {
