@@ -208,6 +208,14 @@ test('the browser picks the real match among look-alike highlights in rendered t
   const farChoice = pickAnchor(candidatesIn(linkyRendered, far.strings), linkyRendered, far.targetBefore, far.targetAfter, farOrdinal)
   assert.equal(farOrdinal, 400)
   assert.equal(farChoice.at, linkyRendered.indexOf('foobar') + 3)
+  // Reference surroundings and rendered text are normalized identically.
+  const dotted = 'Ibar İbar'
+  const dottedPlan = compileQuery('(?<=İ)bar', true)
+  const dottedHit = matchedStrings([{ seq: 1, text: dotted }], dottedPlan, 1, { maxStrings: 10, maxChars: 100 })
+  const dottedChoice = pickAnchor(candidatesIn(dotted, dottedHit.strings), foldText(dotted), dottedHit.targetBefore, dottedHit.targetAfter, targetOrdinal(dotted, dottedHit.strings, dottedHit.targetFirst))
+  assert.equal(dottedChoice.at, 6)
+  const { comparable, comparableIndex } = new Function(helpers + anchor + '; return { comparable, comparableIndex }')()
+  for (const sample of ['ΟΣ ΟΣα', 'İstanbul 😀 Ёж', 'ß ẞ ǅ']) assert.equal(comparableIndex(sample).comp, comparable(sample))
   // A full scan stays cheap on a long message with many candidates.
   const huge = 'a bar '.repeat(30_000)
   const started = Date.now()

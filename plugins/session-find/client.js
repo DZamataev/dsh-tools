@@ -454,8 +454,15 @@ window.__ModuleLoader__.load({
 
     // Letters and digits only, so Markdown markup and dropped link targets do
     // not decide the comparison.
-    const LETTER_OR_DIGIT = /^[\p{L}\p{N}]+$/u
-    const comparable = text => foldText(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    // One code point at a time for both sides (so contextual lowercasing, such
+    // as a final sigma, cannot differ); a lowercase expansion keeps its letters
+    // (İ → i, dropping the combining dot).
+    const comparableChar = char => foldText(char).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    function comparable(text) {
+      let out = ''
+      for (const char of text) out += comparableChar(char)
+      return out
+    }
     /**
      * `comparable(text)` built once, with `map[i]` = its length before
      * `text[i]`, so every candidate is scored by direct character comparison.
@@ -467,8 +474,7 @@ window.__ModuleLoader__.load({
         const char = String.fromCodePoint(text.codePointAt(i))
         map[i] = comp.length
         if (char.length === 2) map[i + 1] = comp.length
-        const lower = char.toLowerCase()
-        if (LETTER_OR_DIGIT.test(lower)) comp += lower
+        comp += comparableChar(char)
         i += char.length
       }
       map[text.length] = comp.length
