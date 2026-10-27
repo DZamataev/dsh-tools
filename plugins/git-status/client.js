@@ -90,6 +90,7 @@ window.__ModuleLoader__.load({
       'push.noRemote': 'The repository has no remote.',
       'push.chooseRemote': 'Several remotes and no upstream; push the first time from a terminal: git push -u <remote> {branch}',
       'push.triangular': 'The push remote ({pushRemote}) differs from the upstream ({upstream}); push from a terminal.',
+      'push.badConfig': 'The branch tracking configuration is unusual ({message}); push from a terminal.',
       'push.timeout': 'Push took too long.',
       'push.failed': 'Push failed: {message}',
       'sync.busy': 'A pull or push is already running in this repository.',
@@ -101,6 +102,7 @@ window.__ModuleLoader__.load({
       'review.clean': 'No changes to review.',
       'review.missing': 'Zed CLI not found; set zedPath in the plugin config.',
       'review.failed': 'Could not open Zed: {message}',
+      'review.unreadable': 'Could not read the HEAD version of {n} file(s), left out: {files}.',
     }
     const ru = {
       'pill.aria': 'Ветка {branch} в {path}',
@@ -171,6 +173,7 @@ window.__ModuleLoader__.load({
       'push.noRemote': 'В репозитории нет remote.',
       'push.chooseRemote': 'Несколько remote и нет upstream — первый раз отправьте из терминала: git push -u <remote> {branch}',
       'push.triangular': 'Push-remote ({pushRemote}) отличается от upstream ({upstream}) — отправьте из терминала.',
+      'push.badConfig': 'Необычная настройка отслеживания ветки ({message}) — отправьте из терминала.',
       'push.timeout': 'Отправка заняла слишком много времени.',
       'push.failed': 'Не удалось отправить: {message}',
       'sync.busy': 'В этом репозитории уже идёт pull или push.',
@@ -182,6 +185,7 @@ window.__ModuleLoader__.load({
       'review.clean': 'Нечего смотреть: изменений нет.',
       'review.missing': 'Не найден Zed CLI — укажите zedPath в настройках плагина.',
       'review.failed': 'Не удалось открыть Zed: {message}',
+      'review.unreadable': 'Не удалось прочитать версию из HEAD у файлов: {n}, они пропущены: {files}.',
     }
     const zh = {
       'pill.aria': '{path} 中的分支 {branch}',
@@ -252,6 +256,7 @@ window.__ModuleLoader__.load({
       'push.noRemote': '仓库没有远程。',
       'push.chooseRemote': '存在多个远程且没有上游；请首次在终端推送：git push -u <remote> {branch}',
       'push.triangular': '推送远程（{pushRemote}）与上游（{upstream}）不同，请在终端推送。',
+      'push.badConfig': '分支跟踪配置异常（{message}），请在终端推送。',
       'push.timeout': '推送耗时过长。',
       'push.failed': '推送失败：{message}',
       'sync.busy': '此仓库中已有拉取或推送正在进行。',
@@ -263,6 +268,7 @@ window.__ModuleLoader__.load({
       'review.clean': '没有需要审阅的修改。',
       'review.missing': '未找到 Zed CLI，请在插件配置中设置 zedPath。',
       'review.failed': '无法打开 Zed：{message}',
+      'review.unreadable': '有 {n} 个文件无法读取 HEAD 版本，已跳过：{files}。',
     }
 
     const CSS = `
@@ -477,6 +483,7 @@ window.__ModuleLoader__.load({
                 : data.error === 'no-remote' ? t('push.noRemote')
                   : data.error === 'choose-remote' ? t('push.chooseRemote', { branch: data.branch })
                     : data.error === 'triangular' ? t('push.triangular', { pushRemote: data.pushRemote, upstream: data.upstream })
+                      : data.error === 'bad-config' ? t('push.badConfig', { message: data.message })
                       : data.error === 'detached' ? t('pull.detached')
                         : data.error === 'busy' ? t('sync.busy')
                           : data.error === 'timeout' ? t('push.timeout')
@@ -485,8 +492,13 @@ window.__ModuleLoader__.load({
       }
       if (action.state === 'done') {
         if (data.opened !== true) return { tone: 'muted', text: t('review.clean') }
-        return { tone: 'done', text: data.truncated ? t('review.truncated', { n: data.files, total: data.total }) : t('review.done', { n: data.files }) }
+        const opened = data.truncated ? t('review.truncated', { n: data.files, total: data.total }) : t('review.done', { n: data.files })
+        const unreadable = Array.isArray(data.unreadable) ? data.unreadable : []
+        return unreadable.length === 0
+          ? { tone: 'done', text: opened }
+          : { tone: 'error', text: `${opened} ${t('review.unreadable', { n: unreadable.length, files: unreadable.slice(0, 3).join(', ') })}` }
       }
+      if (data.error === 'unreadable') return { tone: 'error', text: t('review.unreadable', { n: (data.files ?? []).length, files: (data.files ?? []).slice(0, 3).join(', ') }) }
       return { tone: 'error', text: data.error === 'zed-missing' ? t('review.missing') : t('review.failed', { message: data.message || data.error || '?' }) }
     }
 
@@ -641,6 +653,10 @@ window.__ModuleLoader__.load({
       // The data answers for the directory it was read in; after a switch the
       // previous directory's branch is not shown under the new path.
       const data = entry?.data !== undefined && entry.data !== null && (cwd === undefined || entry.data.cwd === cwd) ? entry.data : null
+      const sizeMissing = entry?.size === undefined
+      React.useEffect(() => {
+        if (open && data !== null && sizeMissing) measure(sessionId, false)
+      }, [open, sessionId, data?.cwd, sizeMissing])
       if (data === null && cwd === undefined) return null
       const label = pillLabel(data, cwd, t)
       const git = data?.git
@@ -757,7 +773,11 @@ window.__ModuleLoader__.load({
           try {
             const data = await post(SIZE_ROUTE, { sessionId, refresh: force }, own.signal)
             if (disposed || sizeControllers.get(sessionId) !== own) return
-            patch(sessionId, () => ({ size: { ...data, loading: false } }))
+            // A size measured for a directory the summary has since left is dropped; the open
+            // panel then asks for the new directory's size.
+            patch(sessionId, previous => (previous.data !== null && previous.data !== undefined && previous.data.cwd !== data.cwd
+              ? { size: undefined }
+              : { size: { ...data, loading: false } }))
           } catch (error) {
             if (disposed || sizeControllers.get(sessionId) !== own) return
             patch(sessionId, previous => ({ size: { ...(previous.size ?? {}), bytes: null, error: 'failed', message: error instanceof Error ? error.message : String(error), loading: false } }))
@@ -790,13 +810,16 @@ window.__ModuleLoader__.load({
             data = { error: 'failed', message: error instanceof Error ? error.message : String(error) }
           }
           if (disposed) return
-          patch(sessionId, () => ({ action: { kind, state, data } }))
+          // An outcome the user dismissed by closing the panel while it ran is not shown later.
+          patch(sessionId, previous => ({ action: previous.action?.dismissed === true ? null : { kind, state, data } }))
           if (kind === 'pull' || kind === 'push') void refresh(sessionId)
         }
 
         const clearAction = (sessionId) => {
           const action = store.getSnapshot().sessions[sessionId]?.action
-          if (action !== undefined && action !== null && action.state !== 'busy') patch(sessionId, () => ({ action: null }))
+          if (action === undefined || action === null) return
+          // A running operation keeps its busy state (it blocks a second one) but drops its outcome.
+          patch(sessionId, () => ({ action: action.state === 'busy' ? { ...action, dismissed: true } : null }))
         }
 
         // Poll each displayed Session while the page is visible.
