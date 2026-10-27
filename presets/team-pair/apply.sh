@@ -65,8 +65,9 @@ EOF
 pnpm() { (cd "$PROFILE" && "$NODE" "$RT/pnpm/bin/pnpm.mjs" "$@"); }
 pnpm install --silent
 INSTALLED="$PROFILE/node_modules/@local/dsh-apply-patch"
-# pnpm keeps an earlier copy of a file: directory; reinstall when it differs from the submodule.
-if ! diff -rq "$PATCH_PKG/lib" "$INSTALLED/lib" >/dev/null 2>&1; then pnpm install --silent --force; fi
+# pnpm keeps an earlier copy of a file: directory, even with --force under nodeLinker: hoisted;
+# remove the copy and install again when it differs from the submodule.
+if ! diff -rq "$PATCH_PKG/lib" "$INSTALLED/lib" >/dev/null 2>&1; then rm -rf "$INSTALLED"; pnpm install --silent; fi
 diff -rq "$PATCH_PKG/lib" "$INSTALLED/lib" >/dev/null || { echo "apply.sh: $INSTALLED does not match $PATCH_PKG" >&2; exit 4; }
 echo "profile: Agent Teams bundle and @local/dsh-apply-patch ($(git -C "$PATCH_PKG" rev-parse --short HEAD 2>/dev/null || echo local)) in $PROFILE/package.json"
 
