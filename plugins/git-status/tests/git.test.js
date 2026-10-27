@@ -52,7 +52,8 @@ test('keeps counting past the line limit', () => {
 })
 
 test('last commit, du, and repository detection', () => {
-  assert.deepEqual(parseLastCommit('413cead\x1ffeat: x · y\x1f1700000000\n'), { sha: '413cead', subject: 'feat: x · y', time: 1_700_000_000_000 })
+  assert.deepEqual(parseLastCommit('413cead\x1ffeat: x · y\x1f1700000000\x1fDenis Z\x1fd@z.dev\n'), { sha: '413cead', subject: 'feat: x · y', time: 1_700_000_000_000, author: 'Denis Z', email: 'd@z.dev' })
+  assert.deepEqual(parseLastCommit('abc\x1fold format\x1f1\n'), { sha: 'abc', subject: 'old format', time: 1000, author: '', email: '' })
   assert.equal(parseLastCommit(''), null)
   assert.equal(parseDuKilobytes('1234\t/Users/me/dir\n'), 1234 * 1024)
   assert.equal(parseDuKilobytes('du: cannot read'), null)

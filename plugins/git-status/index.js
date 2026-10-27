@@ -139,7 +139,7 @@ export function apply(ctx, config) {
     const [status, root, commit] = await Promise.all([
       git(cwd, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal'], signal),
       git(cwd, ['rev-parse', '--show-toplevel'], signal),
-      git(cwd, ['log', '-1', '--format=%h%x1f%s%x1f%ct'], signal),
+      git(cwd, ['log', '-1', '--format=%h%x1f%s%x1f%ct%x1f%an%x1f%ae'], signal),
     ])
     if (status.failure === 'missing') return { error: 'git-missing' }
     if (status.failure === 'timeout') return { error: 'timeout' }

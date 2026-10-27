@@ -83,6 +83,7 @@ test('summary reads the projected directory, branch, changes, and last commit', 
   assert.deepEqual(body.git.lines.map(line => `${line.xy} ${line.path}`), [' M a.txt', '?? new.txt'])
   assert.equal(body.git.root, repo)
   assert.equal(body.git.lastCommit.subject, 'first commit')
+  assert.deepEqual([body.git.lastCommit.author, body.git.lastCommit.email], ['t', 't@t'])
   assert.deepEqual(m.counts(), { observed: 1, disposed: 1 })
 })
 

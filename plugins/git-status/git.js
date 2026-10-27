@@ -73,15 +73,15 @@ export function parseStatusV2(stdout, maxLines) {
 }
 
 /**
- * Parse `git log -1 --format=%h%x1f%s%x1f%ct` output.
+ * Parse `git log -1 --format=%h%x1f%s%x1f%ct%x1f%an%x1f%ae` output.
  * @param {string} stdout - one unit-separated record.
- * @returns {{ sha: string, subject: string, time: number } | null} last commit, or null when absent.
+ * @returns {{ sha: string, subject: string, time: number, author: string, email: string } | null} last commit, or null when absent.
  */
 export function parseLastCommit(stdout) {
-  const [sha, subject, seconds] = stdout.replace(/\n$/, '').split('\x1f')
+  const [sha, subject, seconds, author, email] = stdout.replace(/\n$/, '').split('\x1f')
   if (sha === undefined || sha === '' || subject === undefined) return null
   const time = Number(seconds) * 1000
-  return { sha, subject, time: Number.isFinite(time) ? time : 0 }
+  return { sha, subject, time: Number.isFinite(time) ? time : 0, author: author ?? '', email: email ?? '' }
 }
 
 /**

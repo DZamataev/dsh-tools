@@ -353,7 +353,11 @@ window.__ModuleLoader__.load({
           git.lastCommit !== null && h('span', { className: 'gs-key' }, t('commit')),
           git.lastCommit !== null && h('span', { className: 'gs-val', title: git.lastCommit.subject },
             h('span', { className: 'gs-mono' }, git.lastCommit.sha), ' ', git.lastCommit.subject, ' ',
-            h('span', { className: 'gs-muted' }, `· ${ago(git.lastCommit.time, t)}`)),
+            h('span', { className: 'gs-muted' }, `· ${ago(git.lastCommit.time, t)}`),
+            git.lastCommit.author !== '' && h('span', {
+              className: 'gs-muted',
+              title: git.lastCommit.email === '' ? git.lastCommit.author : `${git.lastCommit.author} <${git.lastCommit.email}>`,
+            }, ` · ${git.lastCommit.author}`)),
           git.root !== null && git.root !== cwd && h('span', { className: 'gs-key' }, t('repository')),
           git.root !== null && git.root !== cwd && h('span', { className: 'gs-val gs-mono' }, abbreviate(git.root, home))),
         h('div', { className: 'gs-rule', 'aria-hidden': true }),
