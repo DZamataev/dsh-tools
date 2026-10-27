@@ -18,7 +18,7 @@
  * with optional locks disabled, so polling never contends with an agent's git.
  */
 
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { access, chmod, constants, lstat, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -104,82 +104,115 @@ const json = (status, body) => new Response(JSON.stringify(body), {
   headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
 })
 
-/** One value git printed on a line of its own: only the newline goes, a path may end in spaces. */
-const line = text => String(text ?? '').replace(/\r?\n$/, '')
+/** One value git printed on a line of its own: only git's LF goes; a path may end in spaces or CR. */
+const line = text => String(text ?? '').replace(/\n$/, '')
 
 /** First stderr line, bounded, for display. */
 const firstLine = text => String(text ?? '').split('\n').map(entry => entry.trim()).find(entry => entry !== '')?.slice(0, 200) ?? ''
 
 /** How long a stopped process group gets between SIGTERM and SIGKILL. */
 export const KILL_GRACE_MS = 3_000
+/**
+ * How long descendants may keep the output pipes open after the program itself exited
+ * (a hook or ssh left behind) before the group is killed and the program's own exit counts.
+ */
+export const LINGER_MS = 2_000
+/** Most bytes kept from a program's standard output; more stops it as `overflow`. */
+export const MAX_STDOUT = 64 * 1024 * 1024
+const MAX_STDERR = 1024 * 1024
 
-/** Signal a child's whole process group (hooks git starts included); a group already gone is fine. */
+/** Signal a child's whole process group (hooks and ssh git starts included); a group already gone is fine. */
 function killGroup(child, signal) {
   try {
     process.kill(-child.pid, signal)
   } catch {
-    try { child.kill(signal) } catch { /* The child has already exited. */ }
+    // The group is gone (or was never created); nothing is left to signal.
   }
 }
 
 /**
- * A runner that starts each program without a shell in its own process group
- * and records it in `children` until the process closes. A timeout or abort
- * sends SIGTERM to the group and SIGKILL after KILL_GRACE_MS; the result is
- * reported once the process has closed. Never rejects.
- * @param {Set<{ closed: Promise<void> }>} children - live processes, for unload to await.
+ * A runner that starts each program without a shell as the leader of a new process group and
+ * records it in `children` until its output pipes close. A timeout or abort sends SIGTERM to the
+ * group and SIGKILL after KILL_GRACE_MS, for as long as the pipes stay open, whether or not the
+ * leader already exited. Descendants holding the pipes LINGER_MS after the leader exited are
+ * killed too, and the leader's exit is the result. Never rejects.
+ * @param {Set<{ closed: Promise<void> }>} children - live process groups, for unload to await.
  */
 function createRunner(children) {
   /**
-   * @returns {Promise<{ code: number | null, stdout: string | Buffer, stderr: string, failure: 'missing' | 'timeout' | 'aborted' | null }>}
+   * @returns {Promise<{ code: number | null, stdout: string | Buffer, stderr: string, failure: 'missing' | 'timeout' | 'aborted' | 'overflow' | null }>}
    */
   return function run(file, args, { timeoutMs, signal, env = {}, encoding = 'utf8' }) {
     return new Promise((resolve) => {
       let stopped = null
-      let timer
-      let grace
+      let closed = false
+      let exitCode = null
+      const timers = []
+      const later = (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); timers.push(t) }
+      const out = []
+      let outBytes = 0
+      const err = []
+      let errBytes = 0
+      let child
+      try {
+        child = spawn(file, args, {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
+        })
+      } catch (error) {
+        resolve({ code: null, stdout: encoding === 'buffer' ? Buffer.alloc(0) : '', stderr: String(error), failure: error?.code === 'ENOENT' ? 'missing' : null })
+        return
+      }
       const onAbort = () => { stop('aborted') }
-      const settle = (result) => {
-        clearTimeout(timer)
+      function stop(reason) {
+        if (closed) return
+        if (stopped === null) stopped = reason
+        killGroup(child, 'SIGTERM')
+        later(() => { if (!closed) killGroup(child, 'SIGKILL') }, KILL_GRACE_MS)
+      }
+      const finish = (result) => {
+        if (closed) return
+        closed = true
+        for (const t of timers) clearTimeout(t)
         signal?.removeEventListener('abort', onAbort)
         resolve(result)
       }
-      let child
-      try {
-        child = execFile(file, args, {
-          encoding,
-          maxBuffer: 64 * 1024 * 1024,
-          windowsHide: true,
-          detached: true,
-          env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
-        }, (error, stdout, stderr) => {
-          const missing = error?.code === 'ENOENT'
-          settle({
-            code: error === null ? 0 : typeof error.code === 'number' ? error.code : null,
-            stdout: stdout ?? '',
-            stderr: String(stderr ?? ''),
-            failure: missing ? 'missing' : stopped,
-          })
+      const entry = {}
+      entry.closed = new Promise((done) => {
+        child.once('error', (error) => {
+          finish({ code: null, stdout: encoding === 'buffer' ? Buffer.alloc(0) : '', stderr: String(error), failure: error?.code === 'ENOENT' ? 'missing' : stopped })
+          done()
         })
-      } catch (error) {
-        settle({ code: null, stdout: '', stderr: String(error), failure: error?.code === 'ENOENT' ? 'missing' : null })
-        return
-      }
-      const entry = { closed: new Promise((done) => { child.once('close', done); child.once('error', done) }) }
-      children.add(entry)
-      void entry.closed.then(() => {
-        clearTimeout(grace)
-        children.delete(entry)
+        child.once('close', (code) => {
+          const stdout = Buffer.concat(out)
+          finish({
+            code: exitCode ?? code,
+            stdout: encoding === 'buffer' ? stdout : stdout.toString('utf8'),
+            stderr: Buffer.concat(err).toString('utf8'),
+            failure: stopped,
+          })
+          done()
+        })
       })
-      function stop(reason) {
-        if (stopped !== null || child.exitCode !== null || child.signalCode !== null) return
-        stopped = reason
-        killGroup(child, 'SIGTERM')
-        grace = setTimeout(() => { killGroup(child, 'SIGKILL') }, KILL_GRACE_MS)
-        grace.unref?.()
-      }
-      timer = setTimeout(() => { stop('timeout') }, timeoutMs)
-      timer.unref?.()
+      children.add(entry)
+      void entry.closed.then(() => { children.delete(entry) })
+      child.stdout.on('data', (chunk) => {
+        outBytes += chunk.length
+        if (outBytes > MAX_STDOUT) stop('overflow')
+        else out.push(chunk)
+      })
+      child.stderr.on('data', (chunk) => {
+        if (errBytes < MAX_STDERR) err.push(chunk)
+        errBytes += chunk.length
+      })
+      child.once('exit', (code) => {
+        exitCode = code
+        // The leader is done; anything still holding the pipes is a leftover descendant.
+        later(() => { if (!closed) { killGroup(child, 'SIGTERM'); later(() => { if (!closed) killGroup(child, 'SIGKILL') }, KILL_GRACE_MS) } }, LINGER_MS)
+      })
+      later(() => { stop('timeout') }, timeoutMs)
       if (signal?.aborted) stop('aborted')
       else signal?.addEventListener('abort', onAbort, { once: true })
     })
@@ -397,17 +430,21 @@ export function apply(ctx, config) {
     // HEAD versions that could not be read (timeout, oversized, corrupt object) are left out
     // and reported, never shown as an empty baseline.
     const unreadable = []
-    for (const change of parsed.lines) {
+    for (const [index, change] of parsed.lines.entries()) {
       const { oldPath, newPath } = reviewSides(change)
       const real = join(root, newPath)
-      let info
-      try {
-        info = await lstat(real)
-      } catch {
-        info = null
+      // Deletion comes from git's status, not the disk: a deleted file `a` may now be a new directory `a/`.
+      const deleted = change.xy[0] === 'D' || change.xy[1] === 'D'
+      let info = null
+      if (!deleted) {
+        try {
+          info = await lstat(real)
+        } catch {
+          info = null
+        }
+        // Submodules and other directories have no file content to compare.
+        if (info !== null && info.isDirectory()) continue
       }
-      // Submodules and other directories have no file content to compare.
-      if (info !== null && info.isDirectory()) continue
       let content = Buffer.alloc(0)
       if (oldPath !== null) {
         // cat-file prints the stored bytes; no textconv, filter, or pager applies.
@@ -418,12 +455,14 @@ export function apply(ctx, config) {
         }
         content = blob.stdout
       }
-      const left = join(snapshot, newPath)
+      // One directory per change keeps file and directory replacements (`a` and `a/b`) apart while
+      // the file name, which Zed shows as the tab title, stays the repository path.
+      const left = join(snapshot, String(index), newPath)
       await mkdir(dirname(left), { recursive: true })
       await writeFile(left, content)
       let right = real
       if (info === null) {
-        right = join(stubs, newPath)
+        right = join(stubs, String(index), newPath)
         await mkdir(dirname(right), { recursive: true })
         await writeFile(right, '')
       }
@@ -490,11 +529,22 @@ export function apply(ctx, config) {
     if (!/^[0-9a-f]{40,64}$/.test(target)) return json(500, { error: 'failed', message: 'could not resolve the upstream commit' })
     // Configuration can turn a merge into something else (merge.autostash, or branch.<b>.mergeOptions
     // such as --squash or --no-ff); the overrides and explicit flags pin a plain fast-forward to the
-    // exact commit compared above, and HEAD is checked afterwards.
+    // exact commit compared above, and HEAD is checked afterwards. GIT_CONFIG_KEY_n/VALUE_n carry
+    // key and value separately, so a branch name containing '=' still names its own key (-c would
+    // split it at the first '=').
     const merged = await run(config.gitPath, [
-      '-C', root, '-c', 'merge.autostash=false', '-c', `branch.${branch}.mergeOptions=`,
-      'merge', '--ff-only', '--no-autostash', '--no-squash', '--no-stat', '--quiet', target,
-    ], { timeoutMs: config.pullTimeoutMs, signal: own })
+      '-C', root, 'merge', '--ff-only', '--no-autostash', '--no-squash', '--no-stat', '--quiet', target,
+    ], {
+      timeoutMs: config.pullTimeoutMs,
+      signal: own,
+      env: {
+        GIT_CONFIG_COUNT: '2',
+        GIT_CONFIG_KEY_0: 'merge.autostash',
+        GIT_CONFIG_VALUE_0: 'false',
+        GIT_CONFIG_KEY_1: `branch.${branch}.mergeOptions`,
+        GIT_CONFIG_VALUE_1: '',
+      },
+    })
     if (merged.failure === 'timeout') return json(504, { error: 'timeout', message: 'git merge took too long' })
     if (merged.code !== 0) {
       const files = overwrittenFiles(merged.stderr)

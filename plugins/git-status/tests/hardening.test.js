@@ -179,6 +179,18 @@ test('review leaves out a file whose HEAD version cannot be read', async () => {
   assert.ok(!args.includes(join(mine, 'b.txt')))
 })
 
+/** Poll until `count` pids are recorded in `file`, for at most `ms`. */
+async function readPids(file, count, ms = 10_000) {
+  const deadline = Date.now() + ms
+  for (;;) {
+    const pids = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(Number) : []
+    if (pids.length >= count) return pids
+    if (Date.now() > deadline) throw new Error(`only ${pids.length} of ${count} processes started`)
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+}
+const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+
 test('unload waits until every child process has exited', async () => {
   const dir = join(root, 'slow')
   mkdirSync(dir, { recursive: true })
@@ -189,10 +201,108 @@ test('unload waits until every child process has exited', async () => {
   chmodSync(slowGit, 0o755)
   const m = mount(dir, { gitPath: slowGit })
   const pending = m.call('/api/git-status.summary').catch(() => null)
-  await new Promise(resolve => setTimeout(resolve, 300))
-  const started = readFileSync(pids, 'utf8').trim().split('\n').map(Number)
-  assert.equal(started.length, 3)
-  await m.unload()
-  for (const pid of started) assert.throws(() => process.kill(pid, 0), /ESRCH/)
+  let started = []
+  try {
+    started = await readPids(pids, 3)
+  } finally {
+    await m.unload()
+  }
+  for (const pid of started) assert.equal(alive(pid), false, `pid ${pid} still alive after unload`)
   await pending
+})
+
+test('a descendant holding the output pipes after git exits neither hangs a request nor outlives unload', async () => {
+  const dir = join(root, 'linger')
+  mkdirSync(dir, { recursive: true })
+  const kids = join(root, 'linger.kids')
+  const lingerGit = join(root, 'linger-git.sh')
+  // Exits at once with success but leaves a 60 s child holding stdout and stderr.
+  writeFileSync(lingerGit, `#!/bin/sh\nsleep 60 &\necho $! >> '${kids}'\nexit 0\n`)
+  chmodSync(lingerGit, 0o755)
+  const m = mount(dir, { gitPath: lingerGit })
+  const started = Date.now()
+  try {
+    const { status } = await m.call('/api/git-status.summary')
+    assert.equal(status, 200)
+    assert.ok(Date.now() - started < 15_000, 'the request settled')
+  } finally {
+    await m.unload()
+  }
+  for (const pid of await readPids(kids, 3)) assert.equal(alive(pid), false, `descendant ${pid} survived`)
+})
+
+/** A clone at exactly `mine` whose upstream (its own bare origin) is one commit ahead. */
+function behindAt(mine, branch = 'main') {
+  const origin = `${mine}.origin.git`
+  const theirs = `${mine}.theirs`
+  execFileSync('git', ['init', '-q', '--bare', '-b', branch, origin], { env: ENV })
+  execFileSync('git', ['clone', '-q', origin, mine], { env: ENV, stdio: 'pipe' })
+  git(mine, 'checkout', '-q', '-B', branch)
+  writeFileSync(join(mine, 'a.txt'), 'one\n')
+  git(mine, 'add', 'a.txt')
+  git(mine, 'commit', '-q', '-m', 'first')
+  git(mine, 'push', '-q', '-u', 'origin', branch)
+  execFileSync('git', ['clone', '-q', '-b', branch, origin, theirs], { env: ENV, stdio: 'pipe' })
+  writeFileSync(join(theirs, 'n.txt'), 'n\n')
+  git(theirs, 'add', 'n.txt')
+  git(theirs, 'commit', '-q', '-m', 'theirs')
+  git(theirs, 'push', '-q', 'origin', branch)
+  return mine
+}
+
+for (const [label, suffix] of [['space', ' '], ['carriage return', '\r']]) {
+  test(`a repository root whose own name ends in a ${label} is not confused with its sibling`, async () => {
+    const base = join(root, `leaf-${label.replace(' ', '-')}`)
+    mkdirSync(base)
+    const exact = behindAt(join(base, `repo${suffix}`))
+    const sibling = behindAt(join(base, 'repo'))
+    const siblingBefore = git(sibling, 'rev-parse', 'HEAD')
+    const { status, body } = await mount(exact).call(PULL_PATH)
+    assert.deepEqual([status, body.result], [200, 'fast-forwarded'])
+    assert.ok(existsSync(join(exact, 'n.txt')))
+    assert.equal(git(sibling, 'rev-parse', 'HEAD'), siblingBefore)
+  })
+}
+
+test('a branch name containing = still has its mergeOptions cleared', async () => {
+  const mine = behindAt(join(root, 'eq-branch'), 'foo=bar')
+  git(mine, 'config', 'branch.foo=bar.mergeOptions', '--squash --no-ff')
+  const cleared = execFileSync('git', ['-C', mine, 'config', '--get', 'branch.foo=bar.mergeOptions'], {
+    env: { ...ENV, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'branch.foo=bar.mergeOptions', GIT_CONFIG_VALUE_0: '' }, encoding: 'utf8',
+  })
+  assert.equal(cleared, '\n')
+  const { status, body } = await mount(mine).call(PULL_PATH)
+  assert.deepEqual([status, body.result], [200, 'fast-forwarded'])
+  assert.equal(git(mine, 'rev-parse', 'HEAD'), git(mine, 'rev-parse', '@{upstream}'))
+  assert.equal(git(mine, 'status', '--porcelain'), '')
+})
+
+test('review keeps a file replaced by a directory and a directory replaced by a file', async () => {
+  const mine = join(root, 'replace')
+  mkdirSync(mine)
+  git(mine, 'init', '-q', '-b', 'main')
+  mkdirSync(join(mine, 'd'))
+  writeFileSync(join(mine, 'd', 'b'), 'in dir\n')
+  writeFileSync(join(mine, 'f'), 'a file\n')
+  git(mine, 'add', '.')
+  git(mine, 'commit', '-q', '-m', 'tree')
+  git(mine, 'rm', '-q', '-r', 'd', 'f')
+  writeFileSync(join(mine, 'd'), 'now a file\n')
+  mkdirSync(join(mine, 'f'))
+  writeFileSync(join(mine, 'f', 'c'), 'now in a dir\n')
+  const log = join(root, 'zed-replace.args')
+  const zed = join(root, 'zed-replace.sh')
+  writeFileSync(zed, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > '${log}'\n`)
+  chmodSync(zed, 0o755)
+  const { status, body } = await mount(mine, { zedPath: zed }).call(REVIEW_PATH)
+  assert.equal(status, 200)
+  assert.deepEqual([body.opened, body.files, body.unreadable], [true, 4, []])
+  const args = readFileSync(log, 'utf8').trimEnd().split('\n')
+  const pairs = []
+  for (let i = 3; i < args.length; i += 3) pairs.push([args[i + 1], args[i + 2]])
+  const leftOf = suffix => pairs.find(([left]) => left.endsWith(suffix))
+  assert.equal(readFileSync(leftOf('/d/b')[0], 'utf8'), 'in dir\n')
+  assert.equal(readFileSync(leftOf('/f')[0], 'utf8'), 'a file\n')
+  assert.ok(pairs.some(([, right]) => right === join(mine, 'd')))
+  assert.ok(pairs.some(([, right]) => right === join(mine, 'f', 'c')))
 })
