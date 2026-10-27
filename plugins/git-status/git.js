@@ -122,6 +122,18 @@ export function overwrittenFiles(stderr) {
 }
 
 /**
+ * The reason a remote refused a push, from `git push --porcelain` output.
+ * @param {string} stdout - porcelain lines; a refused ref starts with `!`.
+ * @returns {string | null} the summary and reason (e.g. "[rejected] (non-fast-forward)"), or null when no ref was refused.
+ */
+export function parsePushRejection(stdout) {
+  const line = String(stdout).split('\n').find(entry => entry.startsWith('!'))
+  if (line === undefined) return null
+  const [, , summary = '', reason = ''] = line.split('\t')
+  return [summary, reason].filter(Boolean).join(' ').trim() || 'rejected'
+}
+
+/**
  * Old and new sides for one changed file in a review of HEAD against the working tree.
  * @param {{ xy: string, path: string, orig: string | null }} line - one parsed status line.
  * @returns {{ oldPath: string | null, newPath: string }} repository-relative paths; a null

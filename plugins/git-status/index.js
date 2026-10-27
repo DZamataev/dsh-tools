@@ -8,7 +8,9 @@
  * directory's disk usage from `du -sk`, cached per directory.
  * `git-status.review` opens the changes against HEAD in one Zed multi-diff
  * window. `git-status.pull` fetches and fast-forwards the current branch to its
- * upstream, and refuses every other outcome.
+ * upstream, and refuses every other outcome. `git-status.push` pushes the
+ * current branch to its upstream (or, without one, to the only remote, setting
+ * the upstream) without force, and refuses a branch that is behind.
  *
  * The browser names only a Session; the directory comes from that Session's
  * `workingDirectory` projection (falling back to its header `cwd`), so a
@@ -20,7 +22,7 @@ import { execFile } from 'node:child_process'
 import { access, constants, lstat, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { isNotRepository, overwrittenFiles, parseDuKilobytes, parseLastCommit, parseLeftRight, parseStatusV2, reviewSides } from './git.js'
+import { isNotRepository, overwrittenFiles, parseDuKilobytes, parseLastCommit, parseLeftRight, parsePushRejection, parseStatusV2, reviewSides } from './git.js'
 
 /** Cordis function-plugin name. */
 export const name = 'git-status'
@@ -35,6 +37,8 @@ export const SIZE_PATH = '/api/git-status.size'
 export const REVIEW_PATH = '/api/git-status.review'
 /** Pull route; the browser addresses it document-relative as `api/git-status.pull`. */
 export const PULL_PATH = '/api/git-status.pull'
+/** Push route; the browser addresses it document-relative as `api/git-status.push`. */
+export const PUSH_PATH = '/api/git-status.push'
 
 /** Zed CLI locations tried when `zedPath` is empty; a Finder-launched Desktop has no /usr/local/bin on PATH. */
 export const ZED_CANDIDATES = ['/usr/local/bin/zed', '/opt/homebrew/bin/zed', '/Applications/Zed.app/Contents/MacOS/cli']
@@ -54,6 +58,7 @@ const DEFAULTS = {
   zedTimeoutMs: 20_000,
   maxReviewFiles: 300,
   pullTimeoutMs: 60_000,
+  pushTimeoutMs: 120_000,
 }
 
 const RANGES = {
@@ -65,6 +70,7 @@ const RANGES = {
   zedTimeoutMs: [1_000, 120_000],
   maxReviewFiles: [1, 10_000],
   pullTimeoutMs: [1_000, 600_000],
+  pushTimeoutMs: [1_000, 1_800_000],
 }
 
 function validate(raw) {
@@ -332,54 +338,118 @@ export function apply(ctx, config) {
     return json(200, { opened: true, files: pairs.length, total: parsed.total, truncated: parsed.truncated })
   }
 
-  /** One pull per repository at a time. */
-  const pulling = new Set()
+  /** One pull or push per repository at a time. */
+  const syncing = new Set()
+  /** BatchMode keeps ssh from waiting for a passphrase nobody can type. */
+  const sshEnv = () => (process.env.GIT_SSH_COMMAND === undefined ? { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : {})
+
+  /**
+   * Run one pull or push under the per-repository lock. A started operation
+   * ends on its own: closing the panel must not cut a merge or push short.
+   */
+  const synced = async (body, signal, operation) => {
+    const directory = await directoryOf(body.sessionId, signal)
+    if (!directory.ok) return directory.response
+    const found = await rootOf(directory.cwd, signal)
+    if (!found.ok) return found.response
+    const { root } = found
+    if (syncing.has(root)) return json(409, { error: 'busy', message: 'a pull or push is already running in this repository' })
+    syncing.add(root)
+    try {
+      const own = lifetime.signal
+      const quick = args => run(config.gitPath, ['-C', root, ...args], { timeoutMs: config.gitTimeoutMs, signal: own })
+      const branch = await quick(['symbolic-ref', '--quiet', '--short', 'HEAD'])
+      if (branch.code !== 0) return json(409, { error: 'detached', message: 'HEAD is detached' })
+      return await operation({ root, own, quick, branch: branch.stdout.trim() })
+    } finally {
+      syncing.delete(root)
+    }
+  }
 
   /**
    * Fetch, then fast-forward the current branch to its upstream. A detached
    * HEAD, a missing upstream, a diverged branch, and local changes the merge
    * would overwrite are refused; nothing else is attempted.
    */
-  const pull = async (body, signal) => {
-    const directory = await directoryOf(body.sessionId, signal)
-    if (!directory.ok) return directory.response
-    const found = await rootOf(directory.cwd, signal)
-    if (!found.ok) return found.response
-    const { root } = found
-    if (pulling.has(root)) return json(409, { error: 'busy', message: 'a pull is already running in this repository' })
-    pulling.add(root)
-    try {
-      // A started pull ends on its own: closing the panel must not cut a merge short.
-      const own = lifetime.signal
-      const quick = args => run(config.gitPath, ['-C', root, ...args], { timeoutMs: config.gitTimeoutMs, signal: own })
-      const branch = await quick(['symbolic-ref', '--quiet', '--short', 'HEAD'])
-      if (branch.code !== 0) return json(409, { error: 'detached', message: 'HEAD is detached' })
-      const upstream = await quick(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])
-      if (upstream.code !== 0) return json(409, { error: 'no-upstream', message: 'the branch has no upstream' })
-      const before = (await quick(['rev-parse', 'HEAD'])).stdout.trim()
-      // BatchMode keeps ssh from waiting for a passphrase nobody can type.
-      const sshEnv = process.env.GIT_SSH_COMMAND === undefined ? { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : {}
-      const fetched = await run(config.gitPath, ['-C', root, 'fetch', '--quiet'], { timeoutMs: config.pullTimeoutMs, signal: own, env: sshEnv })
-      if (fetched.failure === 'timeout') return json(504, { error: 'timeout', message: 'git fetch took too long' })
-      if (fetched.code !== 0) return json(502, { error: 'fetch-failed', message: firstLine(fetched.stderr) })
-      const counts = parseLeftRight((await quick(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])).stdout)
-      const upstreamName = upstream.stdout.trim()
-      if (counts === null) return json(500, { error: 'failed', message: 'could not compare with the upstream' })
-      if (counts.behind === 0) return json(200, { result: 'up-to-date', ahead: counts.ahead, upstream: upstreamName })
-      if (counts.ahead > 0) return json(409, { error: 'diverged', ahead: counts.ahead, behind: counts.behind, upstream: upstreamName, message: 'the branch has diverged from its upstream' })
-      const merged = await run(config.gitPath, ['-C', root, 'merge', '--ff-only', '--quiet', '@{upstream}'], { timeoutMs: config.pullTimeoutMs, signal: own })
-      if (merged.failure === 'timeout') return json(504, { error: 'timeout', message: 'git merge took too long' })
-      if (merged.code !== 0) {
-        const files = overwrittenFiles(merged.stderr)
-        if (files.length > 0) return json(409, { error: 'local-changes', files, message: 'local changes would be overwritten' })
-        return json(500, { error: 'failed', message: firstLine(merged.stderr) })
-      }
-      const after = (await quick(['rev-parse', 'HEAD'])).stdout.trim()
-      return json(200, { result: 'fast-forwarded', commits: counts.behind, from: before.slice(0, 7), to: after.slice(0, 7), upstream: upstreamName })
-    } finally {
-      pulling.delete(root)
+  const pull = (body, signal) => synced(body, signal, async ({ root, own, quick }) => {
+    const upstream = await quick(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])
+    if (upstream.code !== 0) return json(409, { error: 'no-upstream', message: 'the branch has no upstream' })
+    const before = (await quick(['rev-parse', 'HEAD'])).stdout.trim()
+    const fetched = await run(config.gitPath, ['-C', root, 'fetch', '--quiet'], { timeoutMs: config.pullTimeoutMs, signal: own, env: sshEnv() })
+    if (fetched.failure === 'timeout') return json(504, { error: 'timeout', message: 'git fetch took too long' })
+    if (fetched.code !== 0) return json(502, { error: 'fetch-failed', message: firstLine(fetched.stderr) })
+    const counts = parseLeftRight((await quick(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])).stdout)
+    const upstreamName = upstream.stdout.trim()
+    if (counts === null) return json(500, { error: 'failed', message: 'could not compare with the upstream' })
+    if (counts.behind === 0) return json(200, { result: 'up-to-date', ahead: counts.ahead, upstream: upstreamName })
+    if (counts.ahead > 0) return json(409, { error: 'diverged', ahead: counts.ahead, behind: counts.behind, upstream: upstreamName, message: 'the branch has diverged from its upstream' })
+    const merged = await run(config.gitPath, ['-C', root, 'merge', '--ff-only', '--quiet', '@{upstream}'], { timeoutMs: config.pullTimeoutMs, signal: own })
+    if (merged.failure === 'timeout') return json(504, { error: 'timeout', message: 'git merge took too long' })
+    if (merged.code !== 0) {
+      const files = overwrittenFiles(merged.stderr)
+      if (files.length > 0) return json(409, { error: 'local-changes', files, message: 'local changes would be overwritten' })
+      return json(500, { error: 'failed', message: firstLine(merged.stderr) })
     }
-  }
+    const after = (await quick(['rev-parse', 'HEAD'])).stdout.trim()
+    return json(200, { result: 'fast-forwarded', commits: counts.behind, from: before.slice(0, 7), to: after.slice(0, 7), upstream: upstreamName })
+  })
+
+  /**
+   * Push the current branch without force. With an upstream: fetch its remote,
+   * refuse when the branch is behind it (or pushes to a different push remote),
+   * then push HEAD to the upstream branch. Without one: push to the only remote
+   * (or `remote.pushDefault`) under the same branch name and set the upstream.
+   */
+  const push = (body, signal) => synced(body, signal, async ({ root, own, quick, branch }) => {
+    const configValue = async key => {
+      const result = await quick(['config', '--get', key])
+      return result.code === 0 ? result.stdout.trim() : ''
+    }
+    const pushRun = args => run(config.gitPath, ['-C', root, 'push', '--porcelain', ...args], { timeoutMs: config.pushTimeoutMs, signal: own, env: sshEnv() })
+    const outcome = (pushed) => {
+      if (pushed.failure === 'timeout') return json(504, { error: 'timeout', message: 'git push took too long' })
+      if (pushed.code === 0) return null
+      const reason = parsePushRejection(pushed.stdout)
+      if (reason !== null) return json(409, { error: 'rejected', message: reason })
+      return json(502, { error: 'failed', message: firstLine(pushed.stderr) || `exit ${pushed.code}` })
+    }
+    const pushRemote = (await configValue(`branch.${branch}.pushRemote`)) || (await configValue('remote.pushDefault'))
+    const upstream = await quick(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])
+    const head = (await quick(['rev-parse', 'HEAD'])).stdout.trim()
+
+    if (upstream.code === 0) {
+      const upstreamName = upstream.stdout.trim()
+      const remote = await configValue(`branch.${branch}.remote`)
+      const mergeRef = await configValue(`branch.${branch}.merge`)
+      if (remote === '' || mergeRef === '') return json(409, { error: 'no-upstream', message: 'the branch has no upstream' })
+      if (pushRemote !== '' && pushRemote !== remote) {
+        return json(409, { error: 'triangular', pushRemote, upstream: upstreamName, message: 'the push remote differs from the upstream remote' })
+      }
+      if (remote !== '.') {
+        const fetched = await run(config.gitPath, ['-C', root, 'fetch', '--quiet', remote], { timeoutMs: config.pullTimeoutMs, signal: own, env: sshEnv() })
+        if (fetched.failure === 'timeout') return json(504, { error: 'timeout', message: 'git fetch took too long' })
+        if (fetched.code !== 0) return json(502, { error: 'fetch-failed', message: firstLine(fetched.stderr) })
+      }
+      const counts = parseLeftRight((await quick(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])).stdout)
+      if (counts === null) return json(500, { error: 'failed', message: 'could not compare with the upstream' })
+      if (counts.behind > 0) {
+        return json(409, { error: counts.ahead > 0 ? 'diverged' : 'behind', ahead: counts.ahead, behind: counts.behind, upstream: upstreamName, message: 'the branch is behind its upstream' })
+      }
+      if (counts.ahead === 0) return json(200, { result: 'nothing', upstream: upstreamName })
+      const failed = outcome(await pushRun([remote, `HEAD:${mergeRef}`]))
+      if (failed !== null) return failed
+      return json(200, { result: 'pushed', commits: counts.ahead, upstream: upstreamName, to: head.slice(0, 7), setUpstream: false })
+    }
+
+    const remotes = (await quick(['remote'])).stdout.split('\n').map(line => line.trim()).filter(Boolean)
+    if (remotes.length === 0) return json(409, { error: 'no-remote', message: 'the repository has no remote' })
+    const remote = pushRemote !== '' ? pushRemote : remotes.length === 1 ? remotes[0] : ''
+    if (remote === '') return json(409, { error: 'choose-remote', branch, remotes, message: 'several remotes and no upstream' })
+    const ahead = Number((await quick(['rev-list', '--count', 'HEAD', '--not', `--remotes=${remote}`])).stdout.trim()) || 0
+    const failed = outcome(await pushRun(['--set-upstream', remote, `HEAD:refs/heads/${branch}`]))
+    if (failed !== null) return failed
+    return json(200, { result: 'pushed', commits: ahead, upstream: `${remote}/${branch}`, remote, to: head.slice(0, 7), setUpstream: true })
+  })
 
   ctx.effect(() => async () => {
     lifetime.abort()
@@ -407,7 +477,7 @@ export function apply(ctx, config) {
     }
   }
 
-  for (const [path, handler] of [[SUMMARY_PATH, summary], [SIZE_PATH, size], [REVIEW_PATH, review], [PULL_PATH, pull]]) {
+  for (const [path, handler] of [[SUMMARY_PATH, summary], [SIZE_PATH, size], [REVIEW_PATH, review], [PULL_PATH, pull], [PUSH_PATH, push]]) {
     ctx.effect(() => ctx.connection.fetch.register({ path, methods: ['POST'], requestBody: 'buffered', fetch: owned(handler) }), `git-status: POST ${path}`)
   }
 }

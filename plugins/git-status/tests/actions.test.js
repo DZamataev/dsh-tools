@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apply, Config, PULL_PATH, REVIEW_PATH } from '../index.js'
-import { overwrittenFiles, parseLeftRight, reviewSides } from '../git.js'
+import { apply, Config, PULL_PATH, PUSH_PATH, REVIEW_PATH } from '../index.js'
+import { overwrittenFiles, parseLeftRight, parsePushRejection, reviewSides } from '../git.js'
 
 const ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
 const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { env: ENV, stdio: 'pipe', encoding: 'utf8' }).trim()
@@ -204,4 +204,99 @@ test('config accepts the new options and rejects bad ones', () => {
   assert.equal(ok.value.zedPath, '/x/zed')
   assert.ok(Config['~standard'].validate({ zedPath: 3 }).issues)
   assert.ok(Config['~standard'].validate({ maxReviewFiles: 0 }).issues)
+})
+
+const commitIn = (dir, file, text) => {
+  writeFileSync(join(dir, file), text)
+  git(dir, 'add', file)
+  git(dir, 'commit', '-q', '-m', `commit ${file}`)
+}
+const originHead = (theirs, ref = 'main') => {
+  git(theirs, 'fetch', '-q', 'origin')
+  return git(theirs, 'rev-parse', `origin/${ref}`)
+}
+
+test('push: nothing to push, then one local commit', async () => {
+  const { mine, theirs } = remoteSetup('push-ff')
+  const m = mount(mine)
+  const nothing = await m.call(PUSH_PATH)
+  assert.deepEqual([nothing.status, nothing.body.result, nothing.body.upstream], [200, 'nothing', 'origin/main'])
+  commitIn(mine, 'b.txt', 'b\n')
+  const pushed = await m.call(PUSH_PATH)
+  assert.equal(pushed.status, 200)
+  assert.deepEqual([pushed.body.result, pushed.body.commits, pushed.body.setUpstream], ['pushed', 1, false])
+  assert.equal(originHead(theirs), git(mine, 'rev-parse', 'HEAD'))
+})
+
+test('push: refuses a branch that is behind or diverged, touching nothing', async () => {
+  const { mine, theirs, theirsCommit } = remoteSetup('push-behind')
+  theirsCommit('t.txt', 't\n')
+  const behind = await mount(mine).call(PUSH_PATH)
+  assert.deepEqual([behind.status, behind.body.error, behind.body.behind], [409, 'behind', 1])
+  commitIn(mine, 'm.txt', 'm\n')
+  const remoteBefore = originHead(theirs)
+  const diverged = await mount(mine).call(PUSH_PATH)
+  assert.deepEqual([diverged.status, diverged.body.error, diverged.body.ahead, diverged.body.behind], [409, 'diverged', 1, 1])
+  assert.equal(originHead(theirs), remoteBefore)
+})
+
+test('push: a remote refusal is reported with its reason', async () => {
+  const { mine } = remoteSetup('push-hook')
+  const hook = join(root, 'push-hook', 'origin.git', 'hooks', 'pre-receive')
+  writeFileSync(hook, '#!/bin/sh\necho "protected branch" >&2\nexit 1\n')
+  chmodSync(hook, 0o755)
+  commitIn(mine, 'b.txt', 'b\n')
+  const { status, body } = await mount(mine).call(PUSH_PATH)
+  assert.equal(status, 409)
+  assert.equal(body.error, 'rejected')
+  assert.match(body.message, /remote rejected/)
+})
+
+test('push: a new branch is published to the only remote and tracked', async () => {
+  const { mine, theirs } = remoteSetup('push-new')
+  git(mine, 'checkout', '-q', '-b', 'feature/x')
+  commitIn(mine, 'f.txt', 'f\n')
+  const { status, body } = await mount(mine).call(PUSH_PATH)
+  assert.equal(status, 200)
+  assert.deepEqual([body.result, body.setUpstream, body.upstream, body.commits], ['pushed', true, 'origin/feature/x', 1])
+  assert.equal(git(mine, 'rev-parse', '--abbrev-ref', '@{upstream}'), 'origin/feature/x')
+  assert.equal(originHead(theirs, 'feature/x'), git(mine, 'rev-parse', 'HEAD'))
+})
+
+test('push: several remotes, no remote, a separate push remote, and a detached HEAD', async () => {
+  const { mine } = remoteSetup('push-refusals')
+  git(mine, 'remote', 'add', 'other', join(root, 'push-refusals', 'origin.git'))
+  git(mine, 'checkout', '-q', '-b', 'loose')
+  const choose = await mount(mine).call(PUSH_PATH)
+  assert.deepEqual([choose.body.error, choose.body.branch, choose.body.remotes], ['choose-remote', 'loose', ['origin', 'other']])
+  git(mine, 'checkout', '-q', 'main')
+  git(mine, 'config', 'branch.main.pushRemote', 'other')
+  const triangular = await mount(mine).call(PUSH_PATH)
+  assert.deepEqual([triangular.body.error, triangular.body.pushRemote, triangular.body.upstream], ['triangular', 'other', 'origin/main'])
+  git(mine, 'checkout', '-q', '--detach')
+  assert.equal((await mount(mine).call(PUSH_PATH)).body.error, 'detached')
+  const lonely = join(root, 'lonely')
+  mkdirSync(lonely)
+  git(lonely, 'init', '-q', '-b', 'main')
+  commitIn(lonely, 'a.txt', 'a\n')
+  assert.equal((await mount(lonely).call(PUSH_PATH)).body.error, 'no-remote')
+})
+
+test('pull and push share one lock per repository', async () => {
+  const { mine } = remoteSetup('push-lock')
+  const hook = join(root, 'push-lock', 'origin.git', 'hooks', 'pre-receive')
+  writeFileSync(hook, '#!/bin/sh\nsleep 1\nexit 0\n')
+  chmodSync(hook, 0o755)
+  commitIn(mine, 'b.txt', 'b\n')
+  const m = mount(mine)
+  const pushing = m.call(PUSH_PATH)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const pulling = await m.call(PULL_PATH)
+  assert.deepEqual([pulling.status, pulling.body.error], [409, 'busy'])
+  assert.equal((await pushing).body.result, 'pushed')
+})
+
+test('push rejection parsing', () => {
+  assert.equal(parsePushRejection('To /x\n!\tHEAD:refs/heads/main\t[remote rejected]\t(pre-receive hook declined)\nDone\n'), '[remote rejected] (pre-receive hook declined)')
+  assert.equal(parsePushRejection('To /x\n \tHEAD:refs/heads/main\ta..b\nDone\n'), null)
 })

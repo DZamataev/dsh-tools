@@ -13,6 +13,7 @@ window.__ModuleLoader__.load({
     const SUMMARY_ROUTE = 'api/git-status.summary'
     const SIZE_ROUTE = 'api/git-status.size'
     const PULL_ROUTE = 'api/git-status.pull'
+    const PUSH_ROUTE = 'api/git-status.push'
     const REVIEW_ROUTE = 'api/git-status.review'
     const DEFAULT_POLL_MS = 10_000
     const PANEL_WIDTH = 400
@@ -73,10 +74,25 @@ window.__ModuleLoader__.load({
       'pull.localChanges': 'Local changes would be overwritten: {files}. Commit or stash them first.',
       'pull.fetchFailed': 'git fetch failed: {message}',
       'pull.timeout': 'Pull took too long.',
-      'pull.busyRepo': 'Another pull is running in this repository.',
       'pull.detached': 'HEAD is detached; there is no branch to pull.',
       'pull.noUpstream': 'The branch has no upstream.',
       'pull.failed': 'Pull failed: {message}',
+      'push': 'Push',
+      'push.busy': 'Pushing…',
+      'push.title': 'git push to {upstream}; never forced',
+      'push.titleNew': 'git push --set-upstream: publish the branch and track it',
+      'push.done': 'Pushed {n} commit(s) to {upstream}.',
+      'push.doneNew': 'Published the branch as {upstream} and set it as upstream.',
+      'push.nothing': 'Nothing to push: {upstream} already has every commit.',
+      'push.behind': 'The branch is {behind} commit(s) behind {upstream}; pull first.',
+      'push.diverged': 'The branch has diverged from {upstream} (↑{ahead} ↓{behind}); pushing would need force. Merge or rebase it yourself.',
+      'push.rejected': 'The remote refused the push: {message}',
+      'push.noRemote': 'The repository has no remote.',
+      'push.chooseRemote': 'Several remotes and no upstream; push the first time from a terminal: git push -u <remote> {branch}',
+      'push.triangular': 'The push remote ({pushRemote}) differs from the upstream ({upstream}); push from a terminal.',
+      'push.timeout': 'Push took too long.',
+      'push.failed': 'Push failed: {message}',
+      'sync.busy': 'A pull or push is already running in this repository.',
       'review': 'Review in Zed',
       'review.busy': 'Opening…',
       'review.title': 'Open the changes against HEAD in one Zed diff; edits on the right save into the files',
@@ -139,10 +155,25 @@ window.__ModuleLoader__.load({
       'pull.localChanges': 'Локальные изменения были бы перезаписаны: {files}. Сначала закоммитьте или уберите в stash.',
       'pull.fetchFailed': 'git fetch не удался: {message}',
       'pull.timeout': 'Подтягивание заняло слишком много времени.',
-      'pull.busyRepo': 'В этом репозитории уже идёт подтягивание.',
       'pull.detached': 'HEAD отсоединён — нет ветки, которую можно подтянуть.',
       'pull.noUpstream': 'У ветки нет upstream.',
       'pull.failed': 'Не удалось подтянуть: {message}',
+      'push': 'Отправить',
+      'push.busy': 'Отправляю…',
+      'push.title': 'git push в {upstream}; никогда с force',
+      'push.titleNew': 'git push --set-upstream: опубликовать ветку и привязать её',
+      'push.done': 'Отправлено коммитов в {upstream}: {n}.',
+      'push.doneNew': 'Ветка опубликована как {upstream} и привязана как upstream.',
+      'push.nothing': 'Нечего отправлять: в {upstream} уже есть все коммиты.',
+      'push.behind': 'Ветка отстаёт от {upstream} на {behind} — сначала подтяните.',
+      'push.diverged': 'Ветка разошлась с {upstream} (↑{ahead} ↓{behind}) — без force не отправить. Слейте или сделайте rebase вручную.',
+      'push.rejected': 'Remote отклонил отправку: {message}',
+      'push.noRemote': 'В репозитории нет remote.',
+      'push.chooseRemote': 'Несколько remote и нет upstream — первый раз отправьте из терминала: git push -u <remote> {branch}',
+      'push.triangular': 'Push-remote ({pushRemote}) отличается от upstream ({upstream}) — отправьте из терминала.',
+      'push.timeout': 'Отправка заняла слишком много времени.',
+      'push.failed': 'Не удалось отправить: {message}',
+      'sync.busy': 'В этом репозитории уже идёт pull или push.',
       'review': 'Ревью в Zed',
       'review.busy': 'Открываю…',
       'review.title': 'Открыть изменения относительно HEAD одним diff в Zed; правки справа сохраняются в файлы',
@@ -205,10 +236,25 @@ window.__ModuleLoader__.load({
       'pull.localChanges': '本地修改会被覆盖：{files}。请先提交或暂存。',
       'pull.fetchFailed': 'git fetch 失败：{message}',
       'pull.timeout': '拉取耗时过长。',
-      'pull.busyRepo': '此仓库中已有拉取正在进行。',
       'pull.detached': 'HEAD 处于游离状态，没有可拉取的分支。',
       'pull.noUpstream': '该分支没有上游。',
       'pull.failed': '拉取失败：{message}',
+      'push': '推送',
+      'push.busy': '推送中…',
+      'push.title': 'git push 到 {upstream}；从不强制推送',
+      'push.titleNew': 'git push --set-upstream：发布分支并设置上游',
+      'push.done': '已向 {upstream} 推送 {n} 个提交。',
+      'push.doneNew': '分支已发布为 {upstream} 并设为上游。',
+      'push.nothing': '没有可推送的内容：{upstream} 已包含所有提交。',
+      'push.behind': '分支落后 {upstream} {behind} 个提交，请先拉取。',
+      'push.diverged': '分支已与 {upstream} 分叉（↑{ahead} ↓{behind}），推送需要强制。请手动合并或变基。',
+      'push.rejected': '远程拒绝了推送：{message}',
+      'push.noRemote': '仓库没有远程。',
+      'push.chooseRemote': '存在多个远程且没有上游；请首次在终端推送：git push -u <remote> {branch}',
+      'push.triangular': '推送远程（{pushRemote}）与上游（{upstream}）不同，请在终端推送。',
+      'push.timeout': '推送耗时过长。',
+      'push.failed': '推送失败：{message}',
+      'sync.busy': '此仓库中已有拉取或推送正在进行。',
       'review': '在 Zed 中审阅',
       'review.busy': '正在打开…',
       'review.title': '在 Zed 的一个差异视图中打开相对 HEAD 的修改；右侧的编辑会保存到文件',
@@ -413,10 +459,28 @@ window.__ModuleLoader__.load({
           : data.error === 'local-changes' ? t('pull.localChanges', { files: (data.files ?? []).slice(0, 5).join(', ') + ((data.files ?? []).length > 5 ? ', …' : '') })
             : data.error === 'fetch-failed' ? t('pull.fetchFailed', { message: data.message })
               : data.error === 'timeout' ? t('pull.timeout')
-                : data.error === 'busy' ? t('pull.busyRepo')
+                : data.error === 'busy' ? t('sync.busy')
                   : data.error === 'detached' ? t('pull.detached')
                     : data.error === 'no-upstream' ? t('pull.noUpstream')
                       : t('pull.failed', { message: data.message || data.error || '?' })
+        return { tone: 'error', text }
+      }
+      if (action.kind === 'push') {
+        if (action.state === 'done') {
+          if (data.result === 'nothing') return { tone: 'muted', text: t('push.nothing', { upstream: data.upstream }) }
+          return { tone: 'done', text: data.setUpstream ? t('push.doneNew', { upstream: data.upstream }) : t('push.done', { upstream: data.upstream, n: data.commits }) }
+        }
+        const text = data.error === 'behind' ? t('push.behind', { upstream: data.upstream, behind: data.behind })
+          : data.error === 'diverged' ? t('push.diverged', { upstream: data.upstream, ahead: data.ahead, behind: data.behind })
+            : data.error === 'rejected' ? t('push.rejected', { message: data.message })
+              : data.error === 'fetch-failed' ? t('pull.fetchFailed', { message: data.message })
+                : data.error === 'no-remote' ? t('push.noRemote')
+                  : data.error === 'choose-remote' ? t('push.chooseRemote', { branch: data.branch })
+                    : data.error === 'triangular' ? t('push.triangular', { pushRemote: data.pushRemote, upstream: data.upstream })
+                      : data.error === 'detached' ? t('pull.detached')
+                        : data.error === 'busy' ? t('sync.busy')
+                          : data.error === 'timeout' ? t('push.timeout')
+                            : t('push.failed', { message: data.message || data.error || '?' })
         return { tone: 'error', text }
       }
       if (action.state === 'done') {
@@ -432,7 +496,7 @@ window.__ModuleLoader__.load({
       return note === null ? null : h('div', { className: 'gs-note', 'data-tone': note.tone, role: 'status' }, note.text)
     }
 
-    function GitSection({ git, home, cwd, t, action, running, pull, review }) {
+    function GitSection({ git, home, cwd, t, action, running, pull, push, review }) {
       if (git === null) return h('div', { className: 'gs-muted' }, t('notRepo'))
       if (git.error === 'git-missing') return h('div', { className: 'gs-error' }, t('git.missing'))
       if (git.error === 'timeout') return h('div', { className: 'gs-error' }, t('git.timeout'))
@@ -441,22 +505,27 @@ window.__ModuleLoader__.load({
       const branch = git.branch !== null
         ? (git.oid === null ? t('branch.unborn', { branch: git.branch }) : git.branch)
         : t('branch.detached', { sha: shortSha(git.oid) })
-      const pulling = action?.kind === 'pull' && action.state === 'busy'
-      const reviewing = action?.kind === 'review' && action.state === 'busy'
-      const upstream = git.upstream === null
-        ? h('span', { className: 'gs-muted' }, t('upstream.none'))
-        : h('span', { className: 'gs-val-row' },
-          h('span', null, git.upstream, ' ',
+      const busy = kind => action?.kind === kind && action.state === 'busy'
+      const syncing = busy('pull') || busy('push')
+      const reviewing = busy('review')
+      const syncButton = (kind, title, onClick) => h('button', {
+        key: kind,
+        type: 'button',
+        className: 'gs-button gs-link',
+        disabled: syncing || running,
+        title: running ? t('pull.running') : title,
+        onClick,
+      }, busy(kind) ? t(`${kind}.busy`) : t(kind))
+      const upstream = h('span', { className: 'gs-val-row' },
+        git.upstream === null
+          ? h('span', { className: 'gs-muted' }, t('upstream.none'))
+          : h('span', null, git.upstream, ' ',
             h('span', { className: 'gs-muted' }, git.ahead === 0 && git.behind === 0
               ? `· ${t('upstream.sync')}`
               : `· ${t('upstream.ab', { ahead: git.ahead ?? 0, behind: git.behind ?? 0 })}`)),
-          git.branch !== null && h('button', {
-            type: 'button',
-            className: 'gs-button gs-link',
-            disabled: pulling || running,
-            title: running ? t('pull.running') : t('pull.title', { upstream: git.upstream }),
-            onClick: () => { pull() },
-          }, pulling ? t('pull.busy') : t('pull')))
+        git.branch !== null && h('span', null,
+          git.upstream !== null && syncButton('pull', t('pull.title', { upstream: git.upstream }), () => { pull() }),
+          syncButton('push', git.upstream === null ? t('push.titleNew') : t('push.title', { upstream: git.upstream }), () => { push() })))
       const counts = [
         ['staged', git.staged], ['unstaged', git.unstaged], ['untracked', git.untracked], ['conflicted', git.conflicted],
       ].filter(([, n]) => n > 0)
@@ -480,6 +549,7 @@ window.__ModuleLoader__.load({
           git.root !== null && git.root !== cwd && h('span', { className: 'gs-key' }, t('repository')),
           git.root !== null && git.root !== cwd && h('span', { className: 'gs-val gs-mono' }, abbreviate(git.root, home))),
         h(Note, { action, kind: 'pull', t }),
+        h(Note, { action, kind: 'push', t }),
         h('div', { className: 'gs-rule', 'aria-hidden': true }),
         counts.length === 0
           ? h('div', { className: 'gs-muted' }, t('changes.clean'))
@@ -501,7 +571,7 @@ window.__ModuleLoader__.load({
           hidden > 0 && h('div', { className: 'gs-muted' }, t('changes.more', { n: hidden }))))
     }
 
-    function Panel({ entry, cwd, refresh, remeasure, t, panelRef, position, running, pull, review }) {
+    function Panel({ entry, cwd, refresh, remeasure, t, panelRef, position, running, pull, push, review }) {
       const data = entry?.data ?? null
       const path = data?.cwd ?? cwd ?? ''
       const home = data?.home
@@ -516,7 +586,7 @@ window.__ModuleLoader__.load({
         data !== null && data.exists !== false && h(React.Fragment, null,
           h('div', { className: 'gs-grid' }, h(SizeRow, { size: entry.size, remeasure, t })),
           h('div', { className: 'gs-rule', 'aria-hidden': true }),
-          h(GitSection, { git: data.git, home, cwd: data.cwd, t, action: entry.action, running, pull, review })),
+          h(GitSection, { git: data.git, home, cwd: data.cwd, t, action: entry.action, running, pull, push, review })),
         h('div', { className: 'gs-foot' },
           h('button', { type: 'button', className: 'gs-button', disabled: entry?.loading === true, onClick: () => { refresh() } }, t('refresh'))))
     }
@@ -528,7 +598,7 @@ window.__ModuleLoader__.load({
       return { left, bottom: Math.max(PANEL_MARGIN, window.innerHeight - rect.top + PANEL_GAP) }
     }
 
-    function GitPill({ sessionId, useProjection, useSession, useGit, watch, refresh, measure, pull, review, clearAction, t }) {
+    function GitPill({ sessionId, useProjection, useSession, useGit, watch, refresh, measure, pull, push, review, clearAction, t }) {
       const cwd = useProjection('workingDirectory') ?? undefined
       const running = useSession(session => session.running === true)
       const entry = useGit(state => state.sessions[sessionId])
@@ -602,6 +672,7 @@ window.__ModuleLoader__.load({
           remeasure: () => { measure(sessionId, true) },
           running,
           pull: () => { pull(sessionId) },
+          push: () => { push(sessionId) },
           review: () => { review(sessionId) },
           t,
           panelRef,
@@ -696,7 +767,7 @@ window.__ModuleLoader__.load({
         }
 
         /**
-         * Run one pull or review and keep its outcome on the Session's entry.
+         * Run one pull, push, or review and keep its outcome on the Session's entry.
          * Route refusals carry their reason in the JSON body, so a non-2xx
          * answer is an outcome, not a transport failure.
          */
@@ -707,7 +778,7 @@ window.__ModuleLoader__.load({
           let state = 'error'
           let data
           try {
-            const response = await fetch(kind === 'pull' ? PULL_ROUTE : REVIEW_ROUTE, {
+            const response = await fetch(kind === 'pull' ? PULL_ROUTE : kind === 'push' ? PUSH_ROUTE : REVIEW_ROUTE, {
               method: 'POST',
               credentials: 'same-origin',
               headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -720,7 +791,7 @@ window.__ModuleLoader__.load({
           }
           if (disposed) return
           patch(sessionId, () => ({ action: { kind, state, data } }))
-          if (kind === 'pull') void refresh(sessionId)
+          if (kind === 'pull' || kind === 'push') void refresh(sessionId)
         }
 
         const clearAction = (sessionId) => {
@@ -775,6 +846,7 @@ window.__ModuleLoader__.load({
             refresh: (sessionId) => { void refresh(sessionId) },
             measure: (sessionId, force) => { void measure(sessionId, force) },
             pull: (sessionId) => { void act('pull', sessionId) },
+            push: (sessionId) => { void act('push', sessionId) },
             review: (sessionId) => { void act('review', sessionId) },
             clearAction,
           }),
