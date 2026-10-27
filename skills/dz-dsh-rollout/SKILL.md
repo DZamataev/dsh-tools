@@ -101,7 +101,9 @@ ordinary quit → swap the artifact into `ROLLOUT_APP` (`.new`/`.old`, restored 
 `deployed` → profile setup (`ROLLOUT_PROFILE_SETUP`, default dsh-tools `presets/team-pair/apply.sh`:
 Team mode, Codex mode, Codex teammate mode) → post-deploy hook (`plugins/install.sh`: profile link
 plugins, missing dsh-tools plugins connected, bundled pnpm) → open the app → `--push` worktree branches. verify.sh runs the same profile
-setup on the test home before it starts the test instance.
+setup and then the post-deploy hook with `ROLLOUT_HOOK_SCOPE=test` (test home only, the artifact's
+bundled pnpm; live may stay open) on the test home before it starts the test instance, so a new
+dsh-tools plugin reaches the test window on the next verify.
 
 ## Pitfalls
 
@@ -120,7 +122,7 @@ setup on the test home before it starts the test instance.
 - **The test home has no `.credentials.yaml`**: a DeepSeek account sign-in, if used, happens again
   there. API keys come from the seeded `.env`. `verify.sh --reseed` refreshes the seed from live.
 - **Desktop never runs pnpm at startup**: a plugin change in a profile needs the app closed and
-  `plugins/install.sh` (deploy runs it).
+  `plugins/install.sh` (deploy runs it for both homes, verify for the test home).
 - **`zstd` is required.** Open turns are read from `session.v*.jsonl.zstd`, and deploy reads them
   only for the windows it closes; without `zstd` on PATH, deploy refuses ("cannot read open turns")
   when it must read a home, and state.sh prints `open_turns=unknown` (`brew install zstd`).

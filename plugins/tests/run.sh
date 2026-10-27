@@ -206,6 +206,24 @@ out=$(DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_H
 check "a profile without dsh.profile.bundles is warned about and left untouched" \
   '[ $rc -eq 0 ] && [[ $out == *"no dsh.profile.bundles list; @local/dsh-device-reservations not connected"* ]] && cmp -s "$PR10/package.json" "$SB/before10.json"'
 
+# ROLLOUT_HOOK_SCOPE=test fixes only the test home and ignores Desktops outside it
+H11="$SB/home11"; PR11="$H11/profiles/desktop"; mkdir -p "$PR11"; cp "$SB/before.json" "$PR11/package.json"; cp "$PR11/package.json" "$SB/before11.json"
+H12="$SB/home12"; PR12="$H12/profiles/desktop"; mkdir -p "$PR12"; cp "$SB/before.json" "$PR12/package.json"
+run12() { DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_LIVE_HOME="$H11" ROLLOUT_TEST_HOME="$H12" ROLLOUT_HOOK_SCOPE=test "$@" bash "$P/install.sh" 2>&1; }
+"$SB/Run Desk.app/Contents/MacOS/DeepSeek Harness" 120 & dpid=$!; sleep 0.5
+out=$(run12 env); rc=$?
+check "scope=test: a Desktop outside the test home does not block" '[ $rc -eq 0 ] && [[ $out == *"$PR12: 1 link plugin(s) now under $P"* ]]'
+check "scope=test: the live home stays untouched"       'cmp -s "$PR11/package.json" "$SB/before11.json" && [[ $out != *"$PR11"* ]]'
+kill "$dpid"; wait "$dpid" 2>/dev/null
+cp "$SB/before.json" "$PR12/package.json"; cp "$PR12/package.json" "$SB/before12.json"
+mkdesk "$H12/artifacts/abc/Test Desk.app" com.deepseek.benchharness
+"$H12/artifacts/abc/Test Desk.app/Contents/MacOS/DeepSeek Harness" 120 & tpid=$!; sleep 0.5
+out=$(run12 env); rc=$?
+check "scope=test: the test instance blocks the run"    '[ $rc -eq 1 ] && [[ $out == *"a DSH Desktop is running ($H12/artifacts/abc/Test Desk.app)"* ]] && cmp -s "$PR12/package.json" "$SB/before12.json"'
+kill "$tpid"; wait "$tpid" 2>/dev/null
+out=$(ROLLOUT_HOOK_SCOPE=live bash "$P/install.sh" 2>&1); rc=$?
+check "an unknown ROLLOUT_HOOK_SCOPE is refused"        '[ $rc -eq 1 ] && [[ $out == *"ROLLOUT_HOOK_SCOPE must be all or test"* ]]'
+
 # --help prints exactly the header comment
 out=$(bash "$P/install.sh" --help 2>&1); rc=$?
 check "install.sh --help: the whole header comment, nothing after it" \

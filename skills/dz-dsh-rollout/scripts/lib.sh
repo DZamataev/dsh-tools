@@ -208,6 +208,14 @@ run_profile_setup() {  # $1 = DSH home, $2 = DSH checkout at the built sha
   ROLLOUT_SRC=$2 ROLLOUT_APP=$APP ALLOW_LIVE=1 bash -c "$PROFILE_SETUP \"\$1\"" profile-setup "$1"
 }
 
+# Run $POST_DEPLOY on the test home alone while the live app may run (verify.sh, before it starts
+# the test instance). ROLLOUT_HOOK_SCOPE=test tells the hook to leave the live home alone;
+# ROLLOUT_APP is the verified artifact, whose bundled runtime the test instance runs.
+run_test_hook() {  # $1 = verified artifact bundle
+  [ -n "$POST_DEPLOY" ] || return 0
+  ROLLOUT_HOOK_SCOPE=test ROLLOUT_LIVE_HOME=$LIVE_HOME ROLLOUT_TEST_HOME=$TEST_HOME ROLLOUT_APP=$1 bash -c "$POST_DEPLOY"
+}
+
 quit_bundle() {  # $1 = bundle
   local err rc=0
   [ -n "${1:-}" ] || return 0

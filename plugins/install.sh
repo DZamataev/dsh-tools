@@ -20,12 +20,25 @@
 # of a bundle whose CFBundleIdentifier starts with ROLLOUT_BUNDLE_ID, default com.deepseek.harness):
 # it holds the profiles open. PLUGINS_ALLOW_RUNNING_DESKTOP=1 skips the check (for the bench).
 #
+# ROLLOUT_HOOK_SCOPE=test (verify.sh sets it) fixes only ROLLOUT_TEST_HOME and refuses only while a
+# Desktop bundle inside that home runs (the test instance runs from <test home>/artifacts/), so the
+# live app may stay open. The default, all, fixes both homes and refuses while any Desktop runs.
+#
 # Environment: ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME (homes whose profiles/desktop is fixed),
 # ROLLOUT_APP (bundled Node and pnpm; ROLLOUT_NODE / ROLLOUT_PNPM override them),
-# DSH_TOOLS_OLD_PLUGINS (the retired plugin root, default ~/dev/dsh-plugins), PLUGINS_ENSURE.
+# DSH_TOOLS_OLD_PLUGINS (the retired plugin root, default ~/dev/dsh-plugins), PLUGINS_ENSURE,
+# ROLLOUT_HOOK_SCOPE (all or test).
 set -euo pipefail
 case ${1:-} in -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;; esac
 HERE=$(cd "$(dirname "$0")" && pwd)
+LIVE_HOME=${ROLLOUT_LIVE_HOME:-$HOME/.dsh}
+TEST_HOME=${ROLLOUT_TEST_HOME:-$HOME/.dsh-dev}
+SCOPE=${ROLLOUT_HOOK_SCOPE:-all}
+case $SCOPE in
+  all) HOMES=("$LIVE_HOME" "$TEST_HOME") ;;
+  test) HOMES=("$TEST_HOME") ;;
+  *) echo "plugins/install.sh: ROLLOUT_HOOK_SCOPE must be all or test, not $SCOPE" >&2; exit 1 ;;
+esac
 OLD=${DSH_TOOLS_OLD_PLUGINS:-$HOME/dev/dsh-plugins}
 APP=${ROLLOUT_APP:-$HOME/Applications/DeepSeek Harness.app}
 RT="$APP/Contents/Resources/runtime/primary-runtime/dependencies"
@@ -34,10 +47,12 @@ PNPM=${ROLLOUT_PNPM:-$RT/pnpm/bin/pnpm.mjs}
 [ -x "$NODE" ] || { echo "plugins/install.sh: no Node at $NODE" >&2; exit 1; }
 [ -f "$PNPM" ] || { echo "plugins/install.sh: no pnpm at $PNPM" >&2; exit 1; }
 
-# First running DSH Desktop bundle, if any.
+# First running DSH Desktop bundle that holds a profile this run fixes, if any: with
+# ROLLOUT_HOOK_SCOPE=test only a bundle inside the test home counts.
 running_desktop() {
   local bundle id
   while IFS= read -r bundle; do
+    if [ "$SCOPE" = test ] && [[ "$bundle" != "$TEST_HOME"/* ]]; then continue; fi
     id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Contents/Info.plist" 2>/dev/null || true)
     if [[ "$id" == "${ROLLOUT_BUNDLE_ID:-com.deepseek.harness}"* ]]; then printf '%s\n' "$bundle"; return 0; fi
   done < <(ps -axo comm= | sed -E 's/^ +//' | awk '{
@@ -107,7 +122,7 @@ REWRITE='
   }
   console.log([moved, added.length, ...added].join(" "))'
 
-for home in "${ROLLOUT_LIVE_HOME:-$HOME/.dsh}" "${ROLLOUT_TEST_HOME:-$HOME/.dsh-dev}"; do
+for home in "${HOMES[@]}"; do
   profile=$home/profiles/desktop
   backup=$profile/package.json.dz-relink.bak
   rm -f "$backup.tmp"

@@ -9,8 +9,8 @@
 #   3. package the unsigned macOS app, build:check, re-sign it with $ROLLOUT_SIGN_IDENTITY (TCC
 #      grants survive rebuilds) and store it as $ROLLOUT_TEST_HOME/artifacts/<sha>/;
 #   4. seed $ROLLOUT_TEST_HOME from the live home (no credentials, sessions or mobile access), run
-#      $ROLLOUT_PROFILE_SETUP on it, and start the artifact as the test instance (own DSH_HOME and
-#      Electron userData).
+#      $ROLLOUT_PROFILE_SETUP and then $ROLLOUT_POST_DEPLOY (with ROLLOUT_HOOK_SCOPE=test) on it,
+#      and start the artifact as the test instance (own DSH_HOME and Electron userData).
 #
 #   verify.sh               all of the above
 #   verify.sh --full        the whole vitest suite instead of --changed
@@ -220,6 +220,14 @@ if $app; then
     run_profile_setup "$TEST_HOME" "$BUILD_WT" >"$STATE_DIR/verify-profile-setup.log" 2>&1 \
       || fail "profile setup failed: $PROFILE_SETUP $TEST_HOME — see $STATE_DIR/verify-profile-setup.log"
     tail -n 3 "$STATE_DIR/verify-profile-setup.log"
+  fi
+
+  if [ -n "$POST_DEPLOY" ]; then
+    step "post-deploy hook on $TEST_HOME only"
+    stop_test_instance   # the hook reinstalls the profile it reads
+    run_test_hook "$ART" >"$STATE_DIR/verify-hook.log" 2>&1 \
+      || fail "post-deploy hook failed on the test home: $POST_DEPLOY — see $STATE_DIR/verify-hook.log"
+    tail -n 3 "$STATE_DIR/verify-hook.log"
   fi
 
   step "start test instance"

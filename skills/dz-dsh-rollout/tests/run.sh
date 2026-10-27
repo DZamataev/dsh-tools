@@ -218,6 +218,18 @@ check "a conflict leaves develop clean (aborted)"       '[ -z "$(git -C "$SB/for
 git -C "$WT/clean" reset -q --hard develop
 git -C "$SB/fork" branch -q -D feat/conflict
 
+# ── run_test_hook (verify's post-deploy hook on the test home) ──
+hookcmd='printf "%s|%s|%s|%s\n" "$ROLLOUT_HOOK_SCOPE" "$ROLLOUT_APP" "$ROLLOUT_LIVE_HOME" "$ROLLOUT_TEST_HOME" > "$ROLLOUT_TEST_HOME/hook.env"'
+mkdir -p "$TEST"; rm -f "$TEST/hook.env"
+(ROLLOUT_POST_DEPLOY="$hookcmd" bash -c '. "$1/lib.sh"; trap - EXIT; run_test_hook "/art/DeepSeek Harness.app"' run "$S" >/dev/null 2>&1)
+check "run_test_hook runs the hook with scope test, the artifact, and both homes" \
+  '[ "$(cat "$TEST/hook.env" 2>/dev/null)" = "test|/art/DeepSeek Harness.app|$LIVE|$TEST" ]'
+rm -f "$TEST/hook.env"
+(ROLLOUT_POST_DEPLOY= bash -c '. "$1/lib.sh"; trap - EXIT; run_test_hook /art' run "$S" >/dev/null 2>&1); rc=$?
+check "run_test_hook without a hook runs nothing and succeeds" '[ $rc -eq 0 ] && [ ! -e "$TEST/hook.env" ]'
+check "verify.sh calls run_test_hook after the profile setup and before the start" \
+  '[ "$(grep -nE "run_profile_setup \"\\\$TEST_HOME\"|run_test_hook \"\\\$ART\"|step \"start test instance\"" "$S/verify.sh" | cut -d: -f1 | tr "\n" " ")" = "$(grep -nE "run_profile_setup \"\\\$TEST_HOME\"|run_test_hook \"\\\$ART\"|step \"start test instance\"" "$S/verify.sh" | cut -d: -f1 | sort -n | tr "\n" " ")" ] && [ "$(grep -cE "run_test_hook \"\\\$ART\"" "$S/verify.sh")" = 1 ]'
+
 # ── verify.sh ──
 mkbundle "$TEST/artifacts/def456/DeepSeek Harness.app"
 "$TEST/artifacts/def456/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" 120 & tpid=$!; sleep 0.5

@@ -130,7 +130,7 @@ fi
 
 if [ -n "$POST_DEPLOY" ]; then
   step "post-deploy hook"
-  ROLLOUT_LIVE_HOME=$LIVE_HOME ROLLOUT_TEST_HOME=$TEST_HOME ROLLOUT_APP=$APP bash -c "$POST_DEPLOY" \
+  ROLLOUT_HOOK_SCOPE=all ROLLOUT_LIVE_HOME=$LIVE_HOME ROLLOUT_TEST_HOME=$TEST_HOME ROLLOUT_APP=$APP bash -c "$POST_DEPLOY" \
     || fail "post-deploy hook failed: $POST_DEPLOY ($APP is installed, the app stays closed)"
 fi
 

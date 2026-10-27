@@ -35,8 +35,11 @@ ROLLOUT_LEGACY_APP=
 # (dsh-tools presets/team-pair; roles in ~/.config/dz-dsh-rollout/team-roles.yml). Empty: none.
 ROLLOUT_PROFILE_SETUP="$HOME/dev/dsh-tools/presets/team-pair/apply.sh"
 
-# Command run after the bundle is installed, while every window is closed.
-# Gets ROLLOUT_LIVE_HOME, ROLLOUT_TEST_HOME and ROLLOUT_APP in its environment.
+# Command run by deploy.sh after the bundle is installed, while every window is closed
+# (ROLLOUT_HOOK_SCOPE=all), and by verify.sh on the test home before it starts the test instance,
+# while the live app may run (ROLLOUT_HOOK_SCOPE=test: the hook must leave ROLLOUT_LIVE_HOME alone;
+# ROLLOUT_APP is then the verified artifact). Gets ROLLOUT_HOOK_SCOPE, ROLLOUT_LIVE_HOME,
+# ROLLOUT_TEST_HOME and ROLLOUT_APP. The default connects the dsh-tools plugins to the profiles.
 ROLLOUT_POST_DEPLOY="$HOME/dev/dsh-tools/plugins/install.sh"
 
 # Verified artifacts kept besides the deployed one.
