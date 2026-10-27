@@ -154,7 +154,7 @@ window.__ModuleLoader__.load({
 .gs-pill:hover,.gs-pill[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
 .gs-pill svg{width:14px;height:14px;flex:none}
 .gs-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.gs-dirty{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dsw-alias-state-warn-primary)}
+.gs-dirty{width:6px;height:6px;border-radius:50%;flex:none;background:currentColor}
 .gs-ab{flex:none;font-variant-numeric:tabular-nums}
 .gs-panel{position:fixed;z-index:1100;box-sizing:border-box;width:min(${PANEL_WIDTH}px, calc(100vw - ${PANEL_MARGIN * 2}px));max-height:min(70vh, 560px);overflow-y:auto;overscroll-behavior:contain;padding:16px;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu, var(--dsw-alias-bg-overlay));backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:default;display:flex;flex-direction:column;gap:10px}
 .gs-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
