@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-drafts
+      name: '@local/dsh-drafts'
+      config: {}
