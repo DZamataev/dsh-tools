@@ -9,6 +9,9 @@
 # warning says so). PLUGINS_ENSURE="a b" limits this to the named subdirectories, PLUGINS_ENSURE=""
 # to none; a plugin left out of the list is neither added nor removed.
 #
+# A plugin whose package.json declares dependencies gets them installed into its own node_modules
+# (from its pnpm-lock.yaml) when any is missing or at another version than the exact pin.
+#
 # Before rewriting a profile's package.json the script saves the original as
 # package.json.dz-relink.bak (copied to .bak.tmp first, so a .bak is always complete). A failed pnpm
 # install puts the original back and removes the backup. A run killed (signal, power loss) after the
@@ -66,6 +69,30 @@ if [ "${PLUGINS_ALLOW_RUNNING_DESKTOP:-0}" != 1 ]; then
   desk=$(running_desktop)
   if [ -n "$desk" ]; then echo "plugins/install.sh: a DSH Desktop is running ($desk) — quit it first" >&2; exit 1; fi
 fi
+
+# The profile's pnpm does not install the dependencies of a link: package, so a plugin that declares
+# dependencies (web-search-exa) keeps them in its own node_modules. Install them from the plugin's
+# lockfile unless each one is already there at its exact pinned version.
+DEPS_MISSING='
+  const fs = require("fs")
+  const path = require("path")
+  const dir = process.argv[1]
+  const deps = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).dependencies || {}
+  const missing = Object.entries(deps).filter(([name, spec]) => {
+    const manifest = path.join(dir, "node_modules", name, "package.json")
+    return !fs.existsSync(manifest) || JSON.parse(fs.readFileSync(manifest, "utf8")).version !== spec
+  })
+  console.log(missing.map(([name]) => name).join(" "))'
+for manifest in "$HERE"/*/package.json; do
+  dir=$(dirname "$manifest")
+  missing=$("$NODE" -e "$DEPS_MISSING" "$dir")
+  [ -n "$missing" ] || continue
+  if ! "$NODE" "$PNPM" --dir "$dir" install --frozen-lockfile; then
+    echo "plugins/install.sh: pnpm install failed in $dir (missing: $missing)" >&2
+    exit 1
+  fi
+  echo "$dir: installed $missing"
+done
 
 # Node script, args: SRC DST OLD NEW. Writes SRC's package.json to DST with link plugins moved from
 # OLD to NEW and the missing NEW plugins connected (via rename keeping DST's file mode, only when

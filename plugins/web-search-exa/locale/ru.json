@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Поиск в сети через Exa",
+    "description": "Встроенный инструмент web_search ищет через Exa с ключом EXA_API_KEY, а не через поиск DeepSeek, которому нужен ключ DeepSeek. web_fetch по-прежнему скачивает страницы локально по HTTP."
+  }
+}

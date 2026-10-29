@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Exa 网页搜索",
+    "description": "内置 web_search 工具改用 Exa（凭据 EXA_API_KEY）搜索，而不是需要 DeepSeek 密钥的 DeepSeek 搜索。web_fetch 仍通过本地 HTTP 抓取。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Exa Web Search",
+    "description": "Routes the built-in web_search tool through Exa with the EXA_API_KEY credential instead of DeepSeek search, which needs a DeepSeek key. web_fetch keeps the local HTTP fetch."
+  }
+}

@@ -1,0 +1,17 @@
+# The built-in web_search tool searches through Exa instead of DeepSeek Messages search.
+# The provider reads EXA_API_KEY from the launch environment ($DSH_HOME/.env), the same key
+# the mcp-exa connection sends.
+- insert:
+    - id: web-search-exa
+      name: '@deepseek-ai/dsh-web-search-exa'
+      config:
+        searchType: auto
+        highlightsPerResult: 2
+
+# Overrides the base bundle's `web` row; an override replaces the whole config, so
+# fetchProvider is restated.
+- id: web
+  name: '@deepseek-ai/dsh-web'
+  config:
+    searchProvider: exa
+    fetchProvider: http
