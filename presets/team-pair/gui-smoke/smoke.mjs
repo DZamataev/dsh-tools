@@ -2,7 +2,7 @@
 // Playwright smoke: drive the DSH Desktop TEST instance (DSH_HOME=~/.dsh-dev) through its Web UI
 // and prove Agent Teams with per-teammate models works.
 //
-// Env: ROLE (claude-reviewer) LEAD_MODEL ("Claude Sonnet 5.5") TIMEOUT_MIN (20)
+// Env: ROLE (opus-reviewer) LEAD_MODEL ("Claude Sonnet 5.5") TIMEOUT_MIN (20)
 //      FIXTURE (/tmp/team-pair-gui-fixture) WORKSPACE (rn-looky3: sidebar workspace used as the session cwd)
 //      ACCESS_MODE ("Workspace Write" = UI default; the /tmp fixture is outside the workspace so approval cards are expected and auto-approved)
 //      PRESET (hero Agent Preset picker label substring, e.g. "Standard", "Pair: Claude + GPT"; default: leave the picker as is)
@@ -18,7 +18,7 @@ const WT = process.env.DSH_SRC ?? join(homedir(), 'dev', 'deepseek-harness')
 const { chromium } = await import(`${WT}/node_modules/.pnpm/playwright@1.61.1/node_modules/playwright/index.mjs`)
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const ROLE = process.env.ROLE ?? 'claude-reviewer'
+const ROLE = process.env.ROLE ?? 'opus-reviewer'
 const LEAD_MODEL = process.env.LEAD_MODEL ?? 'Claude Sonnet 5.5'
 const TIMEOUT_MIN = Number(process.env.TIMEOUT_MIN ?? 20)
 const FIXTURE = process.env.FIXTURE ?? '/tmp/team-pair-gui-fixture'

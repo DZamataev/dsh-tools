@@ -9,7 +9,7 @@ You are the Team Lead. The teammate runs on a different model, so its value is a
 
 ## Pick the role
 
-Call `spawn_teammate` with the `role` parameter (its description lists the configured roles). Use `gpt-reviewer` for "get gpt/codex to review", `gpt-coder` when the user wants GPT to write code, and `claude-reviewer` when you yourself run on GPT. If the user names a model and no role fits, pass `provider` and `model` explicitly, from the allowed list in the tool description. If `role` is not offered, tell the user Team mode is not selected for this session and continue alone.
+Call `spawn_teammate` with the `role` parameter (its description lists the configured roles). Use `gpt-reviewer` for "get gpt/codex to review", `gpt-coder` when the user wants GPT to write code, and `opus-reviewer` when you yourself run on GPT. If the user names a model and no role fits, pass `provider` and `model` explicitly, from the allowed list in the tool description. If `role` is not offered, tell the user Team mode is not selected for this session and continue alone.
 
 ## Brief the teammate
 
@@ -26,13 +26,13 @@ If you learn that the user also told a teammate directly, in its own session, to
 1. Finish a coherent change and run the tests yourself.
 2. Send the reviewer the change with `send_message`: files, the diff command, what changed and why, how to verify.
 3. Call `wait_agent`. Do not poll with `list_agents` or repeated sends. After it wakes, read the message; if the reviewer is still running, `wait_agent` again.
-4. Verify each finding with your own tool calls: open the cited file:line and reproduce the failure. For a proposed patch, reserve your own file with `mktemp /tmp/team-pair-patch.XXXXXX`, copy the reviewer's file into it once, check that its `shasum -a 256` matches the message, and tell the reviewer you copied it. Work only from your copy: review it, then recheck the hash immediately before `git apply`. Delete your copy by its exact path once you have applied or rejected it; never clean /tmp with a glob.
+4. Verify each finding with your own tool calls: open the cited file:line and reproduce the failure. For a proposed patch, reserve your own file with `mktemp <scratch>/team-pair-patch.XXXXXX` (the project's gitignored `tmp/` when it has one, else `~/dev/scratch`; a plain `mktemp -t team-pair-patch.XXXXXX` only when neither is writable), copy the reviewer's file into it once, check that its `shasum -a 256` matches the message, and tell the reviewer you copied it. Work only from your copy: review it, then recheck the hash immediately before `git apply`. Delete your copy by its exact path once you have applied or rejected it; never clean a scratch folder with a glob.
 5. For every finding, record a decision: apply it (and say what you changed) or reject it with the evidence that refutes it. Do not apply a finding you could not reproduce.
 6. Send the reviewer the updated change and ask for another pass. Stop when the reviewer reports no findings, or after 3 rounds; report what is still disputed.
 
 ## When the teammate goes silent
 
-If `wait_agent` returns and `list_agents` shows the teammate `inactive` with no message from it, send it one short nudge asking for its findings. If it goes inactive silently again, its model route is probably failing; an exhausted quota, for example, makes a GPT turn end empty. Tell the user which teammate and model failed, and offer a teammate on another route (for example `claude-reviewer`) instead of waiting longer.
+If `wait_agent` returns and `list_agents` shows the teammate `inactive` with no message from it, send it one short nudge asking for its findings. If it goes inactive silently again, its model route is probably failing; an exhausted quota, for example, makes a GPT turn end empty. Tell the user which teammate and model failed, and offer a teammate on another route (for example `opus-reviewer`) instead of waiting longer.
 
 ## Boundaries
 
