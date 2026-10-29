@@ -1,0 +1,23 @@
+{
+  "name": "@local/dsh-session-artifacts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Right-sidebar Artifacts tab listing the documents the open Session produced or touched, derived from its durable log on the Host.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "artifacts.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "scripts": { "test": "node --test tests/", "test:client": "node --test tests-client/" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar-right"]
+    }
+  }
+}

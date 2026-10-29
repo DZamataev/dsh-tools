@@ -1,0 +1,4 @@
+- insert:
+    - id: session-artifacts
+      name: '@local/dsh-session-artifacts'
+      config: {}

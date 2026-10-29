@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Artifacts",
+    "description": "A right-sidebar tab listing the documents the open session wrote, edited, presented or mentioned, and the plans it presented with their review outcome. A row opens the file in the built-in preview."
+  }
+}
