@@ -186,6 +186,69 @@ test('a symlinked Session directory keeps the spelling the agent used', async ()
   }
 })
 
+test('artifact slots count distinct files, not spellings (maxArtifacts 1)', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'session-artifacts-')))
+  try {
+    await writeFile(join(root, 'x.md'), 'x')
+    await writeFile(join(root, 'y.md'), 'y')
+    await symlink('x.md', join(root, 'a1.md'))
+    await symlink('x.md', join(root, 'a2.md'))
+    const events = [
+      call(3, 'write', { file_path: 'y.md' }),
+      call(4, 'write', { file_path: 'x.md' }),
+      call(5, 'write', { file_path: 'a2.md' }),
+      call(6, 'write', { file_path: 'a1.md' }),
+    ]
+    const { body } = await mount({ maxArtifacts: 1 }, { events, cwd: root }).post({ sessionId: 'known' })
+    assert.deepEqual(body.artifacts.map(artifact => artifact.name), ['a1.md'])
+    assert.equal(body.truncated, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('aliases alone do not report truncation', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'session-artifacts-')))
+  try {
+    await writeFile(join(root, 'x.md'), 'x')
+    await symlink('x.md', join(root, 'a1.md'))
+    await symlink('x.md', join(root, 'a2.md'))
+    await symlink('x.md', join(root, 'a3.md'))
+    const events = [
+      call(1, 'write', { file_path: 'a1.md' }),
+      call(2, 'write', { file_path: 'a2.md' }),
+      call(3, 'write', { file_path: 'a3.md' }),
+    ]
+    const { body } = await mount({ maxArtifacts: 2 }, { events, cwd: root }).post({ sessionId: 'known' })
+    assert.deepEqual(body.artifacts.map(artifact => artifact.name), ['a3.md'])
+    assert.equal(body.truncated, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('aliases straddling stat batches do not displace a distinct file', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'session-artifacts-')))
+  try {
+    for (const name of ['x.md', 'y.md', 'z.md']) await writeFile(join(root, name), name)
+    for (const name of ['a1.md', 'a2.md', 'a3.md', 'a4.md']) await symlink('x.md', join(root, name))
+    // lastSeq order: a1, a2, a3, y | z, a4 — the last alias lands in the next stat batch.
+    const events = [
+      call(3, 'write', { file_path: 'a4.md' }),
+      call(6, 'write', { file_path: 'z.md' }),
+      call(7, 'write', { file_path: 'y.md' }),
+      call(8, 'write', { file_path: 'a3.md' }),
+      call(9, 'write', { file_path: 'a2.md' }),
+      call(10, 'write', { file_path: 'a1.md' }),
+    ]
+    const { body } = await mount({ maxArtifacts: 3 }, { events, cwd: root }).post({ sessionId: 'known' })
+    assert.deepEqual(body.artifacts.map(artifact => artifact.name), ['a1.md', 'y.md', 'z.md'])
+    assert.equal(body.truncated, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('two spellings of one file merge and keep a logged spelling', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'session-artifacts-')))
   try {

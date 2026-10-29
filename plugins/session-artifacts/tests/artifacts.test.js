@@ -174,6 +174,41 @@ test('patchTools decides which tool arguments carry a patch', () => {
   assert.equal(custom.get('coded.md'), undefined)
 })
 
+test('relative patch headers resolve against the call workdir', () => {
+  const patch = '*** Begin Patch\n*** Add File: notes.md\n*** End Patch'
+  const command = `apply_patch <<'EOF'\n${patch}\nEOF`
+  const relative = collect([call(1, 'bash', { command, workdir: 'sub' })]).artifacts
+  assert.deepEqual(relative.map(artifact => [artifact.path, artifact.relPath]), [['/repo/sub/notes.md', 'sub/notes.md']])
+  const absolute = collect([call(1, 'bash', { command, workdir: '/elsewhere' })]).artifacts
+  assert.deepEqual(absolute.map(artifact => [artifact.path, artifact.relPath]), [['/elsewhere/notes.md', null]])
+  const noWorkdir = collect([call(1, 'bash', { command })]).artifacts
+  assert.deepEqual(noWorkdir.map(artifact => [artifact.path, artifact.relPath]), [['/repo/notes.md', 'notes.md']])
+})
+
+test('a workdir moves both sides of a patch move', () => {
+  const patch = [
+    '*** Begin Patch',
+    '*** Update File: old.md',
+    '*** Move to: new.md',
+    '*** End Patch',
+  ].join('\n')
+  const { artifacts } = collect([call(1, 'bash', { command: `apply_patch <<'EOF'\n${patch}\nEOF`, workdir: 'sub' })])
+  const byName = new Map(artifacts.map(artifact => [artifact.name, artifact]))
+  assert.deepEqual([...byName.keys()].sort(), ['new.md', 'old.md'])
+  assert.deepEqual([byName.get('old.md').path, byName.get('old.md').deleted], ['/repo/sub/old.md', true])
+  assert.deepEqual([byName.get('new.md').path, byName.get('new.md').deleted], ['/repo/sub/new.md', false])
+})
+
+test('a nested bash dispatch resolves its patch headers against its own workdir', () => {
+  const patch = '*** Begin Patch\n*** Add File: notes.md\n*** End Patch'
+  const args = { command: `apply_patch <<'EOF'\n${patch}\nEOF`, workdir: 'sub' }
+  const { artifacts } = collect([
+    event(1, 'tool/ptc-dispatch-start', { subCallId: 's1', name: 'bash', arguments: args }),
+    event(2, 'tool/ptc-dispatch', { subCallId: 's1', name: 'bash', arguments: args, isError: false, content: [] }),
+  ])
+  assert.deepEqual(artifacts.map(artifact => [artifact.path, artifact.relPath]), [['/repo/sub/notes.md', 'sub/notes.md']])
+})
+
 test('a run_code parent does not count the patch its dispatch applied', () => {
   const patch = '*** Begin Patch\n*** Add File: notes.md\n+hi\n*** End Patch'
   const code = `await tools.apply_patch({ input:\n\`\n${patch}\n\`})`

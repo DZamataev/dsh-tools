@@ -1084,6 +1084,9 @@ window.__ModuleLoader__.load({
       const plans = listing?.plans ?? []
       const total = listing?.artifacts.length ?? 0
       const filtering = query.trim() !== '' || kind !== 'all' || prefs.hideMissing
+      // The roving row can vanish under a filter, a chip, or a refetch; the tab
+      // stop then belongs to the first row still on screen.
+      const activePath = rows.some(row => row.path === roving) ? roving : rows[0]?.path
 
       const labels = React.useMemo(() => ({
         code: { copyLabel: t('md.copy'), copiedLabel: t('md.copied') },
@@ -1235,7 +1238,7 @@ window.__ModuleLoader__.load({
           rows.length === 0
             ? h(EmptyState, { filtered: filtering, t })
             : h('ul', { className: 'sa-list', 'aria-label': t('type.label'), onKeyDown: onListKeyDown },
-              rows.map((artifact, index) => h(ArtifactRow, {
+              rows.map(artifact => h(ArtifactRow, {
                 key: artifact.path,
                 artifact,
                 dir: directoryOf(artifact, t),
@@ -1243,7 +1246,7 @@ window.__ModuleLoader__.load({
                 timeTitle: isTime(artifact.lastTime)
                   ? t(artifact.ops > 0 ? 'time.lastChange' : 'time.lastTouch', { time: absoluteTime(artifact.lastTime) })
                   : '',
-                tabIndex: (roving === null ? index === 0 : artifact.path === roving) ? 0 : -1,
+                tabIndex: artifact.path === activePath ? 0 : -1,
                 copied: copyState === artifact.path,
                 onOpen: open,
                 onCopy: copy,
@@ -1306,10 +1309,14 @@ window.__ModuleLoader__.load({
         // because a TabId identifies a tab only within its Session. The
         // renderer caches the face per Session, so this runs once per Session.
         const lifetime = new AbortController()
+        // One disposer per live tab occurrence: it removes the abort listener and
+        // drops the record. A Sidebar keeps occurrences alive after a type
+        // unregisters, so unload must take these listeners with it.
+        const watchers = new Set()
         const makeFace = (sessionId) => {
           const store = createSnapshotStore({ byTab: {} })
           const requests = new Map()
-          const hooked = new Set()
+          const watched = new Map()
 
           const patchTab = (tabId, patch) => {
             const state = store.getSnapshot()
@@ -1322,9 +1329,15 @@ window.__ModuleLoader__.load({
             requests.delete(tabId)
             controller.abort()
           }
+          /** Stop watching one tab's occurrence; idempotent. */
+          const dropWatch = (tabId) => {
+            const remove = watched.get(tabId)
+            watched.delete(tabId)
+            remove?.()
+          }
           const forget = (tabId) => {
+            dropWatch(tabId)
             cancel(tabId)
-            hooked.delete(tabId)
             const state = store.getSnapshot()
             if (state.byTab[tabId] === undefined) return
             const byTab = { ...state.byTab }
@@ -1354,9 +1367,16 @@ window.__ModuleLoader__.load({
             }
             const controller = new AbortController()
             requests.set(tabId, controller)
-            if (!hooked.has(tabId)) {
-              hooked.add(tabId)
-              signal.addEventListener('abort', () => { forget(tabId) }, { once: true })
+            if (!watched.has(tabId)) {
+              // The listener outlives the body, so its disposer is registered with
+              // the plugin: a later unload removes it instead of leaving the face
+              // reachable through a signal the Sidebar still holds.
+              const onAbort = () => { watchers.delete(dispose); forget(tabId) }
+              const remove = () => { signal.removeEventListener('abort', onAbort) }
+              const dispose = () => { watchers.delete(dispose); forget(tabId) }
+              watched.set(tabId, remove)
+              watchers.add(dispose)
+              signal.addEventListener('abort', onAbort, { once: true })
             }
             const current = store.getSnapshot().byTab[tabId]
             const hasData = current !== undefined && current.data !== null
@@ -1418,9 +1438,14 @@ window.__ModuleLoader__.load({
           return { hooks: { artifacts: store }, load, cancel, forget, remember, formatters }
         }
 
-        // Unloading ends every read: each request's signal is linked to this one,
-        // and the faces themselves are released with the renderer's cache.
-        ctx.effect(() => () => { lifetime.abort() }, 'session-artifacts: end requests on unload')
+        // Unloading ends every read and forgets every watched tab: the lifetime
+        // aborts linked requests, and each disposer removes its listener and drops
+        // the record, so a Sidebar occurrence cannot keep this generation alive.
+        ctx.effect(() => () => {
+          lifetime.abort()
+          for (const dispose of [...watchers]) dispose()
+          watchers.clear()
+        }, 'session-artifacts: end requests on unload')
 
         ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab',

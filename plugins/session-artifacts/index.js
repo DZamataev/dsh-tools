@@ -276,19 +276,13 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Collapse entries that reach one file through a symlink. The canonical path is
-   * only the grouping key: the row keeps a logged spelling — the newest one inside
-   * the Session directory when there is one — so `path`, its preview address, and
-   * `relPath` stay what the agent used. A group of one is never rewritten.
+   * Collapse groups of one canonical file into response rows. The canonical path
+   * was only the grouping key: the row keeps a logged spelling — the newest one
+   * inside the Session directory when there is one — so `path`, its preview
+   * address, and `relPath` stay what the agent used. A group of one is never
+   * rewritten.
    */
-  const canonicalize = (artifacts, cwd) => {
-    const groups = new Map()
-    for (const artifact of artifacts) {
-      const identity = artifact.canonical ?? artifact.path
-      const group = groups.get(identity)
-      if (group === undefined) groups.set(identity, [artifact])
-      else group.push(artifact)
-    }
+  const canonicalize = (groups, cwd) => {
     const merged = []
     for (const group of groups.values()) {
       if (group.length === 1) {
@@ -354,22 +348,27 @@ export function apply(ctx, config) {
 
   /**
    * Stat entries in `lastSeq`-descending order, drop mention-only entries that
-   * are not on disk, and stop one survivor past `maxArtifacts` so `truncated`
-   * reports whether the log had more. Logs unexpected stat codes and their
-   * counts only, never paths.
+   * are not on disk, and merge aliases as they arrive, so the stop counts
+   * distinct canonical files rather than rows: `maxArtifacts` slots are never
+   * spent on a second spelling of a file already listed. Logs unexpected stat
+   * codes and their counts only, never paths.
    */
   const visible = async (artifacts, signal) => {
     const limit = config.maxArtifacts + 1
     const failures = new Map()
-    const kept = []
-    for (let start = 0; start < artifacts.length && kept.length < limit; start += STAT_CONCURRENCY) {
+    const groups = new Map()
+    for (let start = 0; start < artifacts.length && groups.size < limit; start += STAT_CONCURRENCY) {
       if (signal.aborted) break
       const chunk = artifacts.slice(start, start + STAT_CONCURRENCY)
       const states = await Promise.all(chunk.map(artifact => statOf(artifact.path, failures, signal)))
       for (const [index, artifact] of chunk.entries()) {
         const state = states[index]
         if (!state.exists && isMentionOnly(artifact)) continue
-        kept.push({ ...artifact, ...state })
+        const entry = { ...artifact, ...state }
+        const identity = entry.canonical ?? entry.path
+        const group = groups.get(identity)
+        if (group === undefined) groups.set(identity, [entry])
+        else group.push(entry)
       }
     }
     if (failures.size > 0) {
@@ -377,7 +376,7 @@ export function apply(ctx, config) {
       const total = [...failures.values()].reduce((sum, count) => sum + count, 0)
       ctx.logger.warn(`session-artifacts: ${total} paths could not be checked (${detail})`)
     }
-    return { kept, truncated: kept.length > config.maxArtifacts }
+    return { groups, truncated: groups.size > config.maxArtifacts }
   }
 
   const list = async (request, signal) => {
@@ -387,13 +386,13 @@ export function apply(ctx, config) {
     if (!parsed.ok) return json(400, { error: parsed.error, message: parsed.message })
     const extracted = await readArtifacts(parsed.sessionId, signal)
     if (!extracted.ok) return extracted.response
-    const { kept, truncated } = await visible(extracted.artifacts, signal)
+    const { groups, truncated } = await visible(extracted.artifacts, signal)
     if (lifetime.signal.aborted) return unloading()
     if (signal.aborted) return json(499, { error: 'aborted', message: 'request aborted' })
     return json(200, {
       ok: true,
       cwd: extracted.cwd,
-      artifacts: canonicalize(kept, extracted.cwd).slice(0, config.maxArtifacts),
+      artifacts: canonicalize(groups, extracted.cwd).slice(0, config.maxArtifacts),
       plans: extracted.plans,
       truncated,
     })

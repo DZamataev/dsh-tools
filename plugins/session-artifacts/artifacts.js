@@ -233,8 +233,10 @@ export function planEntry(plan, { seq, time, turn, maxPlanChars, status }) {
  *
  * Sources are `write` (`write`, and `str_replace_editor create`), `edit`
  * (`edit`, and `str_replace` / `insert` / `undo_edit`), `patch` (apply_patch
- * headers inside a closed envelope, for `patchTools` only; a `run_code` parent
- * whose nested dispatches carry the patch is not scanned twice), `present`
+ * headers inside a closed envelope, for `patchTools` only; relative headers
+ * resolve against the call's `workdir` when it has one, because bash runs the
+ * command there, and a `run_code` parent whose nested dispatches carry the
+ * patch is not scanned twice), `present`
  * (`deliverables/presented`), and `mention` (assistant text). Tool calls,
  * nested `run_code` dispatches, and their results follow the same rules; a call
  * whose result reports `isError: true` contributes no operation, except that an
@@ -318,6 +320,18 @@ export function collectArtifacts(events, { cwd = null, home = homedir(), config 
   }
 
   /**
+   * The directory relative apply_patch headers resolve against: the call's own
+   * `workdir` (bash resolves it against the Session directory before running),
+   * or the effective Session directory.
+   */
+  const patchBaseOf = (args) => {
+    const workdir = args.value?.workdir
+    if (typeof workdir !== 'string' || workdir === '') return effectiveCwd
+    if (isAbsolute(workdir)) return resolve(workdir)
+    return effectiveCwd === null ? null : resolve(effectiveCwd, workdir)
+  }
+
+  /**
    * Record every operation one tool call or nested dispatch performed. A call
    * that dispatched the work itself (`run_code`) is not scanned for a patch
    * programme: its children's arguments are the operations that ran.
@@ -334,13 +348,14 @@ export function collectArtifacts(events, { cwd = null, home = homedir(), config 
       else if (EDITOR_EDITS.has(args.value.command)) note(editorPath, 'edit', { seq, time, at, op: 'edit' })
     }
     if (!scanPatch || !patchTools.has(name)) return
+    const base = patchBaseOf(args)
     for (const text of args.strings) {
       for (const header of parsePatchHeaders(text)) {
         if (header.op === 'move') {
-          if (typeof header.from === 'string') note(header.from, 'patch', { seq, time, at, op: 'move-from' })
-          note(header.path, 'patch', { seq, time, at, op: 'move-to' })
+          if (typeof header.from === 'string') note(header.from, 'patch', { seq, time, at, op: 'move-from', base })
+          note(header.path, 'patch', { seq, time, at, op: 'move-to', base })
         } else {
-          note(header.path, 'patch', { seq, time, at, op: header.op })
+          note(header.path, 'patch', { seq, time, at, op: header.op, base })
         }
       }
     }

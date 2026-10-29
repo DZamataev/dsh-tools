@@ -727,6 +727,58 @@ test('P1 regression: a closed tab forgets its record even when its body is unmou
   assert.equal(view.face.hooks.artifacts.getSnapshot().byTab['t-leak'], undefined)
 })
 
+test('unloading the plugin leaves no listener on a tab the Sidebar still holds', async () => {
+  const counting = () => {
+    const listeners = new Set()
+    const signal = {
+      aborted: false,
+      addEventListener(type, handler) { if (type === 'abort') listeners.add(handler) },
+      removeEventListener(type, handler) { if (type === 'abort') listeners.delete(handler) },
+      close() { signal.aborted = true; for (const handler of [...listeners]) handler() },
+      count: () => listeners.size,
+    }
+    return signal
+  }
+  const plugin = loadPlugin()
+  const live = counting()
+  const view = await mount(plugin, { tabId: 't-unload', signal: live })
+  await settle()
+  assert.equal(live.count(), 1, 'the occurrence is watched while the plugin lives')
+  assert.notEqual(view.face.hooks.artifacts.getSnapshot().byTab['t-unload'], undefined)
+  await view.unmount()
+  await act(async () => { plugin.dispose() })
+  assert.equal(live.count(), 0, 'unload removes the listener from the signal the Sidebar still holds')
+  assert.equal(view.face.hooks.artifacts.getSnapshot().byTab['t-unload'], undefined, 'and drops its record')
+  // The Sidebar may still close the occurrence afterwards: the dead generation must not react.
+  live.close()
+  assert.equal(live.count(), 0)
+  assert.equal(view.face.hooks.artifacts.getSnapshot().byTab['t-unload'], undefined)
+})
+
+test('a reload over a tab signal the Sidebar kept watches it again, once', async () => {
+  const listeners = new Set()
+  const live = {
+    aborted: false,
+    addEventListener(type, handler) { if (type === 'abort') listeners.add(handler) },
+    removeEventListener(type, handler) { if (type === 'abort') listeners.delete(handler) },
+  }
+  const first = loadPlugin()
+  const one = await mount(first, { tabId: 't-reload', signal: live })
+  await settle()
+  assert.equal(listeners.size, 1)
+  await one.unmount()
+  await act(async () => { first.dispose() })
+  assert.equal(listeners.size, 0)
+  const second = loadPlugin()
+  const two = await mount(second, { tabId: 't-reload', signal: live })
+  await settle()
+  assert.equal(listeners.size, 1, 'the new generation watches it exactly once')
+  assert.equal(names(two.container).length, 4)
+  await two.unmount()
+  await act(async () => { second.dispose() })
+  assert.equal(listeners.size, 0)
+})
+
 test('P1 regression: a hidden body does not read at the end of a turn', async () => {
   const plugin = loadPlugin()
   calls.length = 0
@@ -871,6 +923,46 @@ test('rows are one tab stop and move with the arrow keys', async () => {
   assert.equal(document.activeElement, buttons()[2])
   await press(view.container.querySelector('.sa-list'), 'ArrowUp')
   assert.equal(document.activeElement, buttons()[1])
+  await view.unmount()
+})
+
+test('a roving row that leaves the list hands the tab stop to the first survivor', async () => {
+  const plugin = loadPlugin()
+  const view = await mount(plugin, { tabId: 'roving-gone' })
+  await settle()
+  const buttons = () => rows(view.container).map(row => row.querySelector('.sa-open'))
+  const copies = () => rows(view.container).map(row => row.querySelector('.sa-copy'))
+  buttons()[0].focus()
+  await press(view.container.querySelector('.sa-list'), 'ArrowDown')
+  assert.deepEqual(buttons().map(button => button.tabIndex), [-1, 0, -1, -1])
+
+  // The text filter drops the roving row.
+  await type(view.container.querySelector('.sa-input'), 'spec')
+  assert.deepEqual(names(view.container), ['spec.md'])
+  assert.equal(buttons()[0].tabIndex, 0, 'Tab reaches the surviving row')
+  assert.equal(copies()[0].tabIndex, 0)
+
+  // A chip does the same from a fresh roving row.
+  await type(view.container.querySelector('.sa-input'), '')
+  buttons()[1].focus()
+  await press(view.container.querySelector('.sa-list'), 'ArrowDown')
+  assert.deepEqual(buttons().map(button => button.tabIndex), [-1, -1, 0, -1])
+  await click(view.container.querySelector('.sa-chip[data-kind=markdown]'))
+  assert.deepEqual(names(view.container), ['spec.md'])
+  assert.equal(buttons()[0].tabIndex, 0)
+
+  // So does a refetch that no longer lists it.
+  await click(view.container.querySelector('.sa-chip[data-kind=all]'))
+  assert.equal(names(view.container).length, 4)
+  buttons()[2].focus()
+  await press(view.container.querySelector('.sa-list'), 'ArrowDown')
+  assert.deepEqual(buttons().map(button => button.tabIndex), [-1, -1, -1, 0])
+  fetchImpl = async () => ({ ok: true, status: 200, json: async () => listingOf([ARTIFACTS[0]]) })
+  await act(async () => { view.face.load('roving-gone', view.tab.signal, { force: true }) })
+  await settle()
+  assert.deepEqual(names(view.container), ['spec.md'])
+  assert.equal(buttons()[0].tabIndex, 0)
+  fetchImpl = async () => ({ ok: true, status: 200, json: async () => LISTING })
   await view.unmount()
 })
 
