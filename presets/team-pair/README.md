@@ -4,7 +4,7 @@ Agent Presets for the DSH Desktop profile `desktop`, on top of the Agent Teams b
 
 | Picker name | id | What it is |
 |---|---|---|
-| Team mode | `team` | Standard mode plus Agent Teams. The Lead adds teammates by role: by default `gpt-coder`, `gpt-reviewer` (both in Codex teammate mode) and `claude-reviewer`. |
+| Team mode | `team` | Standard mode plus Agent Teams. The Lead adds teammates by role: by default `gpt-coder`, `gpt-reviewer` (both in Codex teammate mode), `claude-reviewer`, `deepseek-coder`, `deepseek-reviewer`, `opus-coder` and `sonnet-coder`. |
 | Codex mode | `codex` | For GPT models in an ordinary session: Standard mode tools, a Codex prompt, and `apply_patch` in Codex format instead of `edit`/`write`. |
 | Codex teammate mode | `team-codex` | The same on top of Team mode, without subagents; selected by roles with `agentPreset: team-codex`, not by hand. |
 
