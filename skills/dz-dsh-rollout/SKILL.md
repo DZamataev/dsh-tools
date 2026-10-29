@@ -52,6 +52,13 @@ Ghostty once their DSH turns are done.
    half-finished one included: when one is not meant to ship, stop and ask. Then `merge.sh`. A
    conflict aborts that merge and stops: resolve it by hand in the fork so both sides survive,
    commit the merge with the resolutions listed, rerun.
+   - **DSH version bump.** When the merge changes `version` in `<fork>/apps/desktop/package.json`,
+     bump the dsh-tools plugin pins before verify: `node -p` that version, then for every
+     `@deepseek-ai/dsh-*` dependency in `~/dev/dsh-tools/plugins/*/package.json` (now
+     `web-search-exa`) check `npm view <name>@<version> version`, set the pin to it, run the app's
+     bundled pnpm `--dir <plugin> install`, and commit `package.json` and `pnpm-lock.yaml` in
+     dsh-tools. Not yet on npm: tell the operator; the plugin keeps the old pin only when they run
+     verify and deploy with `PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1`.
 2. **Verify.** `verify.sh`. The first install and packaging take long; report the step and log
    when silent for minutes. On `FAILED`, read the log the line names.
    - Test failures that upstream lacks are ours: fix them in the owning worktree, merge, verify
@@ -99,8 +106,8 @@ Preconditions (fork clean on develop, develop = verified sha, artifact signature
 turns) → `--push` develop → stop the test instance → quit the live app and the legacy dev build by
 ordinary quit → swap the artifact into `ROLLOUT_APP` (`.new`/`.old`, restored on failure) → stamp
 `deployed` → profile setup (`ROLLOUT_PROFILE_SETUP`, default dsh-tools `presets/team-pair/apply.sh`:
-Team mode, Codex mode, Codex teammate mode) → post-deploy hook (`plugins/install.sh`: profile link
-plugins, missing dsh-tools plugins connected, bundled pnpm) → open the app → `--push` worktree branches. verify.sh runs the same profile
+Team mode, Codex mode, Codex teammate mode) → post-deploy hook (`plugins/install.sh`: DSH pin check, plugin-local
+dependencies, profile link plugins, missing dsh-tools plugins connected, bundled pnpm) → open the app → `--push` worktree branches. verify.sh runs the same profile
 setup and then the post-deploy hook with `ROLLOUT_HOOK_SCOPE=test` (test home only, the artifact's
 bundled pnpm; live may stay open) on the test home before it starts the test instance, so a new
 dsh-tools plugin reaches the test window on the next verify.
@@ -133,6 +140,10 @@ dsh-tools plugin reaches the test window on the next verify.
 - **A failed post-deploy hook** leaves the new app installed and closed. Fix the profile, run
   `~/dev/dsh-tools/plugins/install.sh` (a path in the dsh-tools repository, not in the skill), then
   open the app. No second deploy is needed.
+- **"pins @deepseek-ai/dsh-…@X, but … is DSH Y"** from the hook (verify or deploy): a dsh-tools
+  plugin pins a DSH package to another version than the app; the hook stopped before changing any
+  profile. Do the version bump of step 1, which the message spells out, then rerun verify (after a
+  deploy: run `plugins/install.sh` and open the app).
 - **Never run `verify.sh` from an agent inside the test window**: it stops the test instance, which
   is that agent's own host.
 - **"another DSH Desktop still runs"** (deploy) and `plugins/install.sh: a DSH Desktop is running`:
