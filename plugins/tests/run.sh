@@ -16,6 +16,25 @@ export ROLLOUT_NODE ROLLOUT_PNPM
 # DSH Desktop (com.deepseek.harness…) out of the bench.
 export ROLLOUT_BUNDLE_ID=com.deepseek.benchharness
 [ -f "$ROLLOUT_PNPM" ] || { echo "skip: no pnpm entry at $ROLLOUT_PNPM"; exit 0; }
+# install.sh reads the DSH version from ROLLOUT_APP's Info.plist; a fake app at the version the
+# plugins pin keeps the operator's installed app (and its version) out of the bench.
+mkapp() {
+  mkdir -p "$1/Contents"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>%s</string></dict></plist>\n' "$2" > "$1/Contents/Info.plist"
+}
+DSH_PIN=$("$ROLLOUT_NODE" -e '
+  const fs = require("fs"), path = require("path"), root = process.argv[1]
+  const pins = new Set()
+  for (const dir of fs.readdirSync(root)) {
+    const manifest = path.join(root, dir, "package.json")
+    if (!fs.existsSync(manifest)) continue
+    for (const [name, spec] of Object.entries(JSON.parse(fs.readFileSync(manifest, "utf8")).dependencies || {}))
+      if (name.startsWith("@deepseek-ai/dsh-")) pins.add(spec)
+  }
+  console.log([...pins].join(" "))' "$P")
+case $DSH_PIN in *" "*) echo "FAIL plugins pin different DSH versions: $DSH_PIN"; exit 1 ;; esac
+mkapp "$SB/Pinned DSH.app" "${DSH_PIN:-0.0.0}"
+export ROLLOUT_APP="$SB/Pinned DSH.app"
 
 OLD="$SB/old-plugins"; mkdir -p "$OLD/provider-limits"
 cp "$P/provider-limits/package.json" "$OLD/provider-limits/package.json"
@@ -223,6 +242,23 @@ check "scope=test: the test instance blocks the run"    '[ $rc -eq 1 ] && [[ $ou
 kill "$tpid"; wait "$tpid" 2>/dev/null
 out=$(ROLLOUT_HOOK_SCOPE=live bash "$P/install.sh" 2>&1); rc=$?
 check "an unknown ROLLOUT_HOOK_SCOPE is refused"        '[ $rc -eq 1 ] && [[ $out == *"ROLLOUT_HOOK_SCOPE must be all or test"* ]]'
+
+# a DSH pin that differs from ROLLOUT_APP's version stops the run before anything changes
+if [ -n "$DSH_PIN" ]; then
+  H13="$SB/home13"; PR13="$H13/profiles/desktop"; mkdir -p "$PR13"; cp "$SB/before.json" "$PR13/package.json"; cp "$PR13/package.json" "$SB/before13.json"
+  mkapp "$SB/Newer DSH.app" 99.0.0-bench
+  run13() { DSH_TOOLS_OLD_PLUGINS="$OLD" ROLLOUT_PNPM="$SB/pnpm-ok.mjs" ROLLOUT_APP="$SB/Newer DSH.app" ROLLOUT_LIVE_HOME="$H13" ROLLOUT_TEST_HOME="$SB/none" "$@" bash "$P/install.sh" 2>&1; }
+  out=$(run13 env); rc=$?
+  check "a stale DSH pin stops the run with exit 1 and names the fix" \
+    '[ $rc -eq 1 ] && [[ $out == *"pins @deepseek-ai/dsh-"*"@$DSH_PIN, but $SB/Newer DSH.app is DSH 99.0.0-bench."* ]] && [[ $out == *"Fix: set"*": \"99.0.0-bench\""* ]]'
+  check "a stale DSH pin leaves package.json untouched"  'cmp -s "$PR13/package.json" "$SB/before13.json" && [ -z "$(ls "$PR13" | grep -F .bak)" ]'
+  out=$(run13 env PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1); rc=$?
+  check "PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1 reports the stale pin and continues" \
+    '[ $rc -eq 0 ] && [[ $out == *"continuing with the old pins"* ]] && [[ $out == *"1 link plugin(s) now under $P"* ]]'
+fi
+mkdir -p "$SB/No Version.app/Contents"; echo '<plist version="1.0"><dict/></plist>' > "$SB/No Version.app/Contents/Info.plist"
+out=$(ROLLOUT_APP="$SB/No Version.app" ROLLOUT_LIVE_HOME="$SB/none" ROLLOUT_TEST_HOME="$SB/none2" bash "$P/install.sh" 2>&1); rc=$?
+check "an app without a version is refused"            '[ $rc -eq 1 ] && [[ $out == *"cannot read the DSH version"* ]]'
 
 # --help prints exactly the header comment
 out=$(bash "$P/install.sh" --help 2>&1); rc=$?

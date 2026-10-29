@@ -10,7 +10,10 @@
 # to none; a plugin left out of the list is neither added nor removed.
 #
 # A plugin whose package.json declares dependencies gets them installed into its own node_modules
-# (from its pnpm-lock.yaml) when any is missing or at another version than the exact pin.
+# (from its pnpm-lock.yaml) when any is missing or at another version than the exact pin. A pin on a
+# DSH package (@deepseek-ai/dsh-*) must equal the DSH version of ROLLOUT_APP: otherwise the script
+# stops with exit 1 before changing anything and prints how to bump the pin
+# (PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1 only reports it).
 #
 # Before rewriting a profile's package.json the script saves the original as
 # package.json.dz-relink.bak (copied to .bak.tmp first, so a .bak is always complete). A failed pnpm
@@ -49,6 +52,39 @@ NODE=${ROLLOUT_NODE:-$RT/node/bin/node}
 PNPM=${ROLLOUT_PNPM:-$RT/pnpm/bin/pnpm.mjs}
 [ -x "$NODE" ] || { echo "plugins/install.sh: no Node at $NODE" >&2; exit 1; }
 [ -f "$PNPM" ] || { echo "plugins/install.sh: no pnpm at $PNPM" >&2; exit 1; }
+
+# A plugin dependency on a DSH package (@deepseek-ai/dsh-*) is pinned to one DSH version, because
+# those packages pin their DSH peers exactly. Stop before touching anything when a pin differs from
+# the version of ROLLOUT_APP (CFBundleShortVersionString), naming the plugin and the fix.
+# PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1 reports the mismatch and continues.
+DSH_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || true)
+[ -n "$DSH_VERSION" ] || { echo "plugins/install.sh: cannot read the DSH version from $APP/Contents/Info.plist" >&2; exit 1; }
+STALE_PINS='
+  const fs = require("fs")
+  const path = require("path")
+  const [root, version] = process.argv.slice(1)
+  for (const dir of fs.readdirSync(root).sort()) {
+    const manifest = path.join(root, dir, "package.json")
+    if (!fs.existsSync(manifest)) continue
+    const deps = JSON.parse(fs.readFileSync(manifest, "utf8")).dependencies || {}
+    for (const [name, spec] of Object.entries(deps)) {
+      if (name.startsWith("@deepseek-ai/dsh-") && spec !== version) console.log(`${dir} ${name} ${spec}`)
+    }
+  }'
+stale=$("$NODE" -e "$STALE_PINS" "$HERE" "$DSH_VERSION")
+if [ -n "$stale" ]; then
+  while read -r dir name spec; do
+    echo "plugins/install.sh: $HERE/$dir pins $name@$spec, but $APP is DSH $DSH_VERSION." >&2
+    echo "  Fix: set \"$name\": \"$DSH_VERSION\" in $HERE/$dir/package.json, run" >&2
+    echo "  \"$NODE\" \"$PNPM\" --dir \"$HERE/$dir\" install, and commit package.json and pnpm-lock.yaml" >&2
+    echo "  (check first that $name@$DSH_VERSION is published: npm view $name@$DSH_VERSION version)." >&2
+  done <<<"$stale"
+  if [ "${PLUGINS_ALLOW_DSH_VERSION_MISMATCH:-0}" = 1 ]; then
+    echo "plugins/install.sh: PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1, continuing with the old pins" >&2
+  else
+    exit 1
+  fi
+fi
 
 # First running DSH Desktop bundle that holds a profile this run fixes, if any: with
 # ROLLOUT_HOOK_SCOPE=test only a bundle inside the test home counts.

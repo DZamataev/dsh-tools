@@ -20,4 +20,4 @@ RT="$HOME/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-r
 "$RT/node/bin/node" "$RT/pnpm/bin/pnpm.mjs" --dir plugins/web-search-exa install --frozen-lockfile
 ```
 
-Версия закреплена точно и должна совпадать с версией DSH: у пакета точные peer-зависимости на `dsh-web` и `dsh-launch-environment`. При смене версии DSH поменяйте пин в `package.json`, выполните `pnpm install` в этой папке и закоммитьте `pnpm-lock.yaml`.
+Версия закреплена точно и должна совпадать с версией DSH: у пакета точные peer-зависимости на `dsh-web` и `dsh-launch-environment`. При смене версии DSH поменяйте пин в `package.json`, выполните `pnpm install` в этой папке и закоммитьте `pnpm-lock.yaml`. Пропустить это не получится: `plugins/install.sh` сверяет пин с версией приложения (`CFBundleShortVersionString` в `ROLLOUT_APP`) и при расхождении падает с кодом 1, ничего не меняя и печатая готовые команды. Поэтому rollout остановится уже на verify. `PLUGINS_ALLOW_DSH_VERSION_MISMATCH=1` пропускает проверку и оставляет старый пин.
