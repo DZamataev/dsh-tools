@@ -11,4 +11,4 @@ Denis Zamataev's tools for DeepSeek Harness (DSH).
 - `plugins/web-search-exa/`: configuration-only bundle that routes the built-in `web_search` tool through Exa (`EXA_API_KEY`) instead of DeepSeek search; its pinned npm provider lives in the plugin's own `node_modules`, which `plugins/install.sh` installs.
 - `mcp/sudo39/`: submodule of the hardened sudo39 fork (DZamataev/sudo39, branch `main`): an MCP server that runs allowlisted root-owned programs as root after the user approves a native macOS dialog naming the command; the policy is read-only and comes from the `mcp-sudo39` entry in `$DSH_HOME/cordis.patch.yml`. Build: `cargo build --release --locked`, install to `~/.local/bin/sudo39`.
 
-Design: `docs/specs/2026-10-21-dz-dsh-rollout-design.md`.
+Design: `docs/specs/2026-10-21-dz-dsh-rollout-design.md`, `docs/specs/2026-10-29-session-artifacts-design.md`.
