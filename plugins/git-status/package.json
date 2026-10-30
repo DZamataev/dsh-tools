@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The session's git branch in the composer status bar; its panel shows the working directory, its size, a copy-path button, and a short git status.",
+  "description": "The session's git branch in the composer status bar and the New Session row; its panel shows the working directory, its size, a copy-path button, and a short git status.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

@@ -1,6 +1,7 @@
-// Client half of git-status: a pill in the composer dock naming the session's
-// git branch (or its directory outside a repository), opening a panel with the
-// directory, its size, a copy-path button, and a short git status.
+// Client half of git-status: a pill in the composer dock, and in the New Session
+// row while the Session is blank, naming the session's git branch (or its
+// directory outside a repository), opening a panel with the directory, its
+// size, a copy-path button, and a short git status.
 window.__ModuleLoader__.load({
   id: '@local/dsh-git-status',
   factory(require) {
@@ -19,6 +20,8 @@ window.__ModuleLoader__.load({
     const PANEL_WIDTH = 400
     const PANEL_MARGIN = 12
     const PANEL_GAP = 8
+    // With 0.7 of the window height, the same cap as the stylesheet's min(70vh, 560px).
+    const PANEL_MAX_HEIGHT = 560
     const COPIED_MS = 1_500
 
     const en = {
@@ -603,11 +606,22 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'gs-button', disabled: entry?.loading === true, onClick: () => { refresh() } }, t('refresh'))))
     }
 
+    /**
+     * Place the panel above the pill (the docked composer sits at the window
+     * bottom) unless the room below is larger, as for the New Session row in
+     * the middle of the window; the panel never grows past the chosen side.
+     */
     function panelPosition(anchor) {
       const rect = anchor.getBoundingClientRect()
       const width = Math.min(PANEL_WIDTH, window.innerWidth - PANEL_MARGIN * 2)
       const left = Math.min(Math.max(PANEL_MARGIN, rect.left), window.innerWidth - width - PANEL_MARGIN)
-      return { left, bottom: Math.max(PANEL_MARGIN, window.innerHeight - rect.top + PANEL_GAP) }
+      const cap = Math.min(PANEL_MAX_HEIGHT, window.innerHeight * 0.7)
+      const above = rect.top - PANEL_GAP - PANEL_MARGIN
+      const below = window.innerHeight - rect.bottom - PANEL_GAP - PANEL_MARGIN
+      if (above >= cap || above >= below) {
+        return { left, bottom: Math.max(PANEL_MARGIN, window.innerHeight - rect.top + PANEL_GAP), maxHeight: Math.max(0, Math.min(cap, above)) }
+      }
+      return { left, top: rect.bottom + PANEL_GAP, maxHeight: Math.max(0, Math.min(cap, below)) }
     }
 
     function GitPill({ sessionId, useProjection, useSession, useGit, watch, refresh, measure, pull, push, review, clearAction, t }) {
@@ -857,22 +871,36 @@ window.__ModuleLoader__.load({
           }
         }, 'git-status: polling')
 
+        const injected = () => ({
+          hooks: { git: store },
+          watch,
+          refresh: (sessionId) => { void refresh(sessionId) },
+          measure: (sessionId, force) => { void measure(sessionId, force) },
+          pull: (sessionId) => { void act('pull', sessionId) },
+          push: (sessionId) => { void act('push', sessionId) },
+          review: (sessionId) => { void act('review', sessionId) },
+          clearAction,
+        })
+
+        // The status bar under a Session's composer; the composer renders it
+        // only once the Session has left the New Session hero.
         ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
           name: 'conversation.composer.dock',
           id: 'git-status',
           // Before the activity pill (0), like the branch in an editor status bar.
           order: -1,
           locale: NS,
-          inject: () => ({
-            hooks: { git: store },
-            watch,
-            refresh: (sessionId) => { void refresh(sessionId) },
-            measure: (sessionId, force) => { void measure(sessionId, force) },
-            pull: (sessionId) => { void act('pull', sessionId) },
-            push: (sessionId) => { void act('push', sessionId) },
-            review: (sessionId) => { void act('review', sessionId) },
-            clearAction,
-          }),
+          inject: injected,
+        }, GitPill))
+
+        // The New Session row, right of the workspace and preset controls; the
+        // hero renders it only for a blank Session, so the two never show together.
+        ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
+          name: 'conversation.hero.options',
+          id: 'git-status',
+          order: -1,
+          locale: NS,
+          inject: injected,
         }, GitPill))
       },
     }
