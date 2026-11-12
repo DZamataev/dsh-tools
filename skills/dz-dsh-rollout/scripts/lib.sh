@@ -202,10 +202,10 @@ stop_test_instance() {
 # stop the test instance first, it shares the bundle id.
 # Run $PROFILE_SETUP on one DSH home whose Desktop is closed. The command gets the home as its first
 # argument and ROLLOUT_SRC (DSH checkout at the built sha), ROLLOUT_APP and ALLOW_LIVE=1 in its
-# environment. Returns the command's status; no command configured returns 0.
-run_profile_setup() {  # $1 = DSH home, $2 = DSH checkout at the built sha
+# environment (ROLLOUT_APP is $3, verify passes its artifact, so it works before any install). Returns the command's status; no command configured returns 0.
+run_profile_setup() {  # $1 = DSH home, $2 = DSH checkout at the built sha, $3 = app bundle (default $APP)
   [ -n "$PROFILE_SETUP" ] || return 0
-  ROLLOUT_SRC=$2 ROLLOUT_APP=$APP ALLOW_LIVE=1 bash -c "$PROFILE_SETUP \"\$1\"" profile-setup "$1"
+  ROLLOUT_SRC=$2 ROLLOUT_APP=${3:-$APP} ALLOW_LIVE=1 bash -c "$PROFILE_SETUP \"\$1\"" profile-setup "$1"
 }
 
 # Run $POST_DEPLOY on the test home alone while the live app may run (verify.sh, before it starts

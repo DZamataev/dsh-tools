@@ -217,7 +217,7 @@ if $app; then
   if [ -n "$PROFILE_SETUP" ]; then
     step "profile setup $TEST_HOME"
     stop_test_instance   # the setup edits the profile it reads
-    run_profile_setup "$TEST_HOME" "$BUILD_WT" >"$STATE_DIR/verify-profile-setup.log" 2>&1 \
+    run_profile_setup "$TEST_HOME" "$BUILD_WT" "$ART" >"$STATE_DIR/verify-profile-setup.log" 2>&1 \
       || fail "profile setup failed: $PROFILE_SETUP $TEST_HOME — see $STATE_DIR/verify-profile-setup.log"
     tail -n 3 "$STATE_DIR/verify-profile-setup.log"
   fi
